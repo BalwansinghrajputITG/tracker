@@ -1,0 +1,53 @@
+services:
+  # Redis only (MongoDB is Atlas cloud)
+  redis:
+    image: redis:7.4-alpine
+    container_name: enterprise_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - app_network
+
+  # FastAPI Backend — exposed on host port 8004 (for ngrok)
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    container_name: enterprise_backend
+    restart: unless-stopped
+    env_file:
+      - ../../backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8004:8000"
+    depends_on:
+      - redis
+    networks:
+      - app_network
+
+  # React Frontend — exposed on host port 3000
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: https://rose-architect-estates-welcome.trycloudflare.com/api/v1
+        REACT_APP_WS_URL: wss://bruce-replication-mediterranean-biology.trycloudflare.com/ws
+    container_name: enterprise_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
+volumes:
+  redis_data:
+
+networks:
+  app_network:
+    driver: bridge

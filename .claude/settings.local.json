@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(mongod --version)",
+      "Bash(redis-server --version)",
+      "Bash(docker compose:*)",
+      "Bash(docker --version)",
+      "Bash(docker info:*)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(''''scripts:'''', d.get\\(''''scripts'''',{}\\)\\)\")"
+    ]
+  }
+}
