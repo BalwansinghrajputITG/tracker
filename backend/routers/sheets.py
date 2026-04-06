@@ -75,15 +75,17 @@ class ColumnDef(BaseModel):
 
 class SheetCreate(BaseModel):
     name: str
-    sheet_type: str = "custom"
+    sheet_type: str = "other"
     project_id: Optional[str] = None
     description: str = ""
+    url: Optional[str] = None
     columns: Optional[list[ColumnDef]] = None
 
 
 class SheetUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    url: Optional[str] = None
     is_pinned: Optional[bool] = None
     columns: Optional[list[ColumnDef]] = None
 
@@ -101,14 +103,16 @@ async def _assert_sheet_access(db, sheet, current_user):
         return
     if str(sheet.get("created_by", "")) == str(current_user["_id"]):
         return
+    sheet_pid = sheet.get("project_id")
+    sheet_pid_str = str(sheet_pid) if sheet_pid else None
     if is_pm(current_user):
         pm_pids = await get_pm_project_ids(db, current_user)
-        if sheet.get("project_id") in pm_pids:
+        if sheet_pid_str and sheet_pid_str in {str(p) for p in pm_pids}:
             return
         raise HTTPException(status_code=403, detail="Access denied")
     if is_team_lead(current_user):
         tl_pids = await get_team_project_ids(db, current_user)
-        if sheet.get("project_id") in tl_pids:
+        if sheet_pid_str and sheet_pid_str in {str(p) for p in tl_pids}:
             return
         raise HTTPException(status_code=403, detail="Access denied")
     raise HTTPException(status_code=403, detail="Access denied")
@@ -195,10 +199,6 @@ async def create_sheet(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    role = current_user.get("primary_role", "")
-    if role not in ("ceo", "coo", "pm", "team_lead"):
-        raise HTTPException(status_code=403, detail="Only managers can create sheets")
-
     template = SHEET_TEMPLATES.get(body.sheet_type, SHEET_TEMPLATES["custom"])
     columns = [c.model_dump() for c in body.columns] if body.columns else template["columns"]
 
@@ -206,6 +206,7 @@ async def create_sheet(
     doc = {
         "name": body.name.strip(),
         "sheet_type": body.sheet_type,
+        "url": (body.url or "").strip(),
         "project_id": ObjectId(body.project_id) if body.project_id else None,
         "description": body.description.strip(),
         "columns": columns,
@@ -285,6 +286,8 @@ async def update_sheet(
         updates["name"] = body.name.strip()
     if body.description is not None:
         updates["description"] = body.description.strip()
+    if body.url is not None:
+        updates["url"] = body.url.strip()
     if body.is_pinned is not None:
         updates["is_pinned"] = body.is_pinned
     if body.columns is not None:
@@ -329,6 +332,7 @@ async def add_entry(
         "created_by": current_user["_id"],
         "created_at": now,
         "updated_at": now,
+        "history": [],
     }
     result = await db.sheet_entries.insert_one(doc)
     await db.sheets.update_one({"_id": ObjectId(sheet_id)}, {"$set": {"updated_at": now}})
@@ -350,9 +354,17 @@ async def update_entry(
         raise HTTPException(status_code=403, detail="Cannot edit this entry")
 
     now = datetime.now(timezone.utc)
+    history_event = {
+        "at": now.isoformat(),
+        "by_name": current_user.get("full_name", ""),
+        "data_before": entry.get("data", {}),
+    }
     await db.sheet_entries.update_one(
         {"_id": ObjectId(entry_id)},
-        {"$set": {"data": body.data, "updated_at": now}}
+        {
+            "$set": {"data": body.data, "updated_at": now},
+            "$push": {"history": history_event},
+        }
     )
     await db.sheets.update_one({"_id": ObjectId(sheet_id)}, {"$set": {"updated_at": now}})
     return {"message": "Entry updated"}

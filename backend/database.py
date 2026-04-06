@@ -42,6 +42,9 @@ class MongoDB:
         # Notifications
         await db.notifications.create_index([("user_id", 1), ("is_read", 1)])
         await db.notifications.create_index("created_at")
+        # Departments
+        await db.departments.create_index("name", unique=True)
+        await db.departments.create_index("created_by")
         logger.info("MongoDB indexes created")
 
 

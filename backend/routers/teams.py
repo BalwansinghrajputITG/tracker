@@ -34,7 +34,7 @@ async def list_teams(
 ):
     primary_role = current_user.get("primary_role", "")
     query = {"is_active": {"$ne": False}}
-    if primary_role in {"ceo", "coo"}:
+    if primary_role in {"ceo", "coo", "admin"}:
         pass  # see all teams
     elif primary_role == "pm":
         # PM sees teams where they are the pm_id or a member
@@ -277,7 +277,9 @@ async def remove_member(
     db=Depends(get_db),
 ):
     team = await db.teams.find_one({"_id": ObjectId(team_id)})
-    if team and is_team_lead(current_user) and not is_exec(current_user) and not is_pm(current_user):
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    if is_team_lead(current_user) and not is_exec(current_user) and not is_pm(current_user):
         if str(team.get("lead_id", "")) != str(current_user["_id"]):
             raise HTTPException(status_code=403, detail="You can only remove members from teams you lead.")
     uid = ObjectId(user_id)

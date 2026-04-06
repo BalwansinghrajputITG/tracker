@@ -21,10 +21,11 @@ def require_any_role(*roles: str):
 
 
 # Convenience dependencies
-require_ceo        = require_roles("ceo")
-require_ceo_coo    = require_roles("ceo", "coo")
-require_manager    = require_roles("ceo", "coo", "pm", "team_lead")
-require_pm_or_above = require_roles("ceo", "coo", "pm")
+require_ceo          = require_roles("ceo")
+require_ceo_coo      = require_roles("ceo", "coo")
+require_dept_admin   = require_roles("ceo", "coo", "admin")   # department management
+require_manager      = require_roles("ceo", "coo", "pm", "team_lead", "admin")
+require_pm_or_above  = require_roles("ceo", "coo", "pm")
 # Includes admin — for user-management endpoints only
 require_user_manager = require_roles("ceo", "coo", "admin", "pm", "team_lead")
 require_authenticated = get_current_user

@@ -16,7 +16,7 @@ from fastapi import HTTPException
 # ─── Role helpers ─────────────────────────────────────────────────────────────
 
 def is_exec(user: dict) -> bool:
-    return bool(set(user.get("roles", [])).intersection({"ceo", "coo"}))
+    return bool(set(user.get("roles", [])).intersection({"ceo", "coo", "admin"}))
 
 
 def is_pm(user: dict) -> bool:

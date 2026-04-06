@@ -92,7 +92,7 @@ export const ProjectsPage: React.FC = () => {
   const [commitDayFilter, setCommitDayFilter]   = useState('')
   const [nameSearch, setNameSearch]             = useState('')
 
-  const canCreate = ['ceo', 'coo', 'pm', 'team_lead'].includes(user?.primary_role || '')
+  const canCreate = ['ceo', 'coo', 'admin', 'pm', 'team_lead'].includes(user?.primary_role || '')
   const canManageProject = (project: any) => {
     const role = user?.primary_role || ''
     if (['ceo', 'coo', 'pm'].includes(role)) return true

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useSelector } from 'react-redux'
 import {
   ArrowLeft, FolderOpen, GitBranch, Link2, Layout, Users, CheckCircle2,
@@ -6,6 +6,7 @@ import {
   BarChart2, GitCommitHorizontal, ChevronDown, ChevronUp,
   Shield, User, Calendar, Clock, Zap, RefreshCw, X, Eye, EyeOff, Save,
   Activity, Settings, Wrench, ListChecks, KeyRound, CheckCheck, RotateCcw,
+  UserPlus, UserMinus, Search,
 } from 'lucide-react'
 import { RootState } from '../store'
 import { navigate } from './AppLayout'
@@ -1244,6 +1245,315 @@ const PhaseTracker: React.FC<PhaseTrackerProps> = ({ project, canManage, project
 }
 
 
+// ─── Members Tab ─────────────────────────────────────────────────────────────
+
+const MembersTab: React.FC<{
+  project: any
+  projectId: string
+  canManage: boolean
+  onMemberChange: () => void
+}> = ({ project, projectId, canManage, onMemberChange }) => {
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [searchQuery, setSearchQuery]  = useState('')
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [searching, setSearching]      = useState(false)
+  const [adding, setAdding]            = useState<string | null>(null)
+  const [removing, setRemoving]        = useState<string | null>(null)
+  const [actionError, setActionError]  = useState('')
+  const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const memberIds = new Set((project.members || []).map((m: any) => m.id))
+
+  const searchUsers = useCallback(async (q: string) => {
+    if (!q.trim()) { setSearchResults([]); return }
+    setSearching(true)
+    try {
+      const r = await api.get('/users', { params: { search: q, limit: 20 } })
+      const all: any[] = r.data.users || r.data || []
+      setSearchResults(all.filter((u: any) => !memberIds.has(u.id || u._id)))
+    } catch {
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }, [memberIds])
+
+  const handleSearchChange = (q: string) => {
+    setSearchQuery(q)
+    if (searchRef.current) clearTimeout(searchRef.current)
+    searchRef.current = setTimeout(() => searchUsers(q), 300)
+  }
+
+  const addMember = async (userId: string) => {
+    setAdding(userId)
+    setActionError('')
+    try {
+      await api.post(`/projects/${projectId}/members/${userId}`)
+      onMemberChange()
+      setSearchResults(prev => prev.filter(u => (u.id || u._id) !== userId))
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || 'Failed to add member')
+    } finally {
+      setAdding(null)
+    }
+  }
+
+  const removeMember = async (userId: string) => {
+    setRemoving(userId)
+    setActionError('')
+    try {
+      await api.delete(`/projects/${projectId}/members/${userId}`)
+      onMemberChange()
+    } catch (err: any) {
+      setActionError(err?.response?.data?.detail || 'Failed to remove member')
+    } finally {
+      setRemoving(null)
+    }
+  }
+
+  const teamLeads = (project.members || []).filter((m: any) => m.role === 'team_lead')
+  const employees = (project.members || []).filter((m: any) => m.role !== 'team_lead')
+
+  return (
+    <div className="animate-fade-in space-y-5">
+      {/* Header row with Add button */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500 font-medium">
+          {(project.members?.length || 0)} member{project.members?.length !== 1 ? 's' : ''}
+        </p>
+        {canManage && (
+          <button
+            onClick={() => { setShowAddModal(true); setSearchQuery(''); setSearchResults([]); setActionError('') }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+          >
+            <UserPlus size={13} /> Add Member
+          </button>
+        )}
+      </div>
+
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded-xl">{actionError}</div>
+      )}
+
+      {/* Project Manager */}
+      {project.pm && (
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+            <Shield size={11} className="text-indigo-500" /> Project Manager
+          </p>
+          <div
+            onClick={() => navigate(`/users/${project.pm.id}`)}
+            className="inline-flex items-center gap-3 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-2xl cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all"
+          >
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-base shrink-0 shadow-sm">
+              {project.pm.name[0]}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-gray-900">{project.pm.name}</p>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-600 text-white">PM</span>
+              </div>
+              <p className="text-xs text-indigo-500 mt-0.5">{project.pm.email}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Team Leads */}
+      {teamLeads.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+            <Shield size={11} className="text-teal-500" /> Team Leads
+            <span className="ml-1 bg-teal-100 text-teal-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{teamLeads.length}</span>
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {teamLeads.map((m: any) => (
+              <MemberCard
+                key={m.id} member={m} canManage={canManage}
+                removing={removing === m.id}
+                onRemove={() => removeMember(m.id)}
+                onNavigate={() => navigate(`/users/${m.id}`)}
+                variant="teal"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Employees */}
+      {employees.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+            <Users size={11} /> Employees
+            <span className="ml-1 bg-gray-100 text-gray-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{employees.length}</span>
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {employees.map((m: any) => (
+              <MemberCard
+                key={m.id} member={m} canManage={canManage}
+                removing={removing === m.id}
+                onRemove={() => removeMember(m.id)}
+                onNavigate={() => navigate(`/users/${m.id}`)}
+                variant="default"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(!project.pm && (!project.members || project.members.length === 0)) && (
+        <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+          <Users size={28} className="mb-2 text-gray-200" />
+          <p className="text-sm">No members added yet</p>
+          {canManage && (
+            <button onClick={() => setShowAddModal(true)} className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 font-semibold hover:underline">
+              <UserPlus size={13} /> Add the first member
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Add Member Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setShowAddModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-blue-50 rounded-xl flex items-center justify-center">
+                  <UserPlus size={15} className="text-blue-600" />
+                </div>
+                <h2 className="text-base font-bold text-gray-900">Add Member</h2>
+              </div>
+              <button onClick={() => setShowAddModal(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors">
+                <X size={14} className="text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Search input */}
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  autoFocus
+                  value={searchQuery}
+                  onChange={e => handleSearchChange(e.target.value)}
+                  placeholder="Search by name, email or department…"
+                  className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
+                />
+                {searching && <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />}
+              </div>
+
+              {/* Results list */}
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {!searchQuery.trim() && (
+                  <p className="text-xs text-gray-400 text-center py-6">Type a name or email to search users</p>
+                )}
+                {searchQuery.trim() && !searching && searchResults.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-6">No users found — they may already be a member</p>
+                )}
+                {searchResults.map((u: any) => {
+                  const uid = u.id || u._id
+                  return (
+                    <div key={uid} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all">
+                      <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${getGrad(u.full_name || u.name || '')} flex items-center justify-center text-white font-bold text-sm shrink-0`}>
+                        {(u.full_name || u.name || '?')[0]?.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{u.full_name || u.name}</p>
+                        <p className="text-xs text-gray-400 truncate">{u.primary_role?.replace('_', ' ')}{u.department ? ` · ${u.department}` : ''}</p>
+                      </div>
+                      <button
+                        onClick={() => addMember(uid)}
+                        disabled={adding === uid}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors shrink-0"
+                      >
+                        {adding === uid ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                        Add
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {actionError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{actionError}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Member Card ──────────────────────────────────────────────────────────────
+
+const MemberCard: React.FC<{
+  member: any
+  canManage: boolean
+  removing: boolean
+  onRemove: () => void
+  onNavigate: () => void
+  variant: 'teal' | 'default'
+}> = ({ member, canManage, removing, onRemove, onNavigate, variant }) => {
+  const [confirmRemove, setConfirmRemove] = useState(false)
+
+  const bgClass   = variant === 'teal' ? 'bg-teal-50 border-teal-200 hover:border-teal-400' : 'bg-white border-gray-100 hover:border-blue-200 hover:bg-blue-50/30'
+  const gradClass = variant === 'teal' ? 'from-teal-500 to-emerald-600' : getGrad(member.name)
+  const badgeEl   = variant === 'teal'
+    ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-teal-500 text-white shrink-0">TL</span>
+    : null
+
+  if (confirmRemove) {
+    return (
+      <div className="flex flex-col gap-2 p-4 bg-red-50 border-2 border-red-200 rounded-2xl">
+        <p className="text-xs font-semibold text-red-700">Remove <span className="font-bold">{member.name}</span> from this project?</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { onRemove(); setConfirmRemove(false) }}
+            disabled={removing}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors"
+          >
+            {removing ? <Loader2 size={11} className="animate-spin" /> : <UserMinus size={11} />} Remove
+          </button>
+          <button onClick={() => setConfirmRemove(false)} className="flex-1 py-1.5 bg-white text-gray-600 text-xs font-semibold rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`flex items-center gap-3 p-4 rounded-2xl shadow-sm border transition-all group ${bgClass}`}>
+      <div
+        onClick={onNavigate}
+        className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradClass} flex items-center justify-center text-white font-bold shrink-0 cursor-pointer`}
+      >
+        {member.name[0]}
+      </div>
+      <div className="flex-1 min-w-0 cursor-pointer" onClick={onNavigate}>
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-blue-700 transition-colors">{member.name}</p>
+          {badgeEl}
+        </div>
+        <p className="text-xs text-gray-400 capitalize truncate">{member.role?.replace('_', ' ')}{member.department ? ` · ${member.department}` : ''}</p>
+        {member.email && <p className="text-xs text-blue-400 truncate">{member.email}</p>}
+      </div>
+      {canManage && (
+        <button
+          onClick={() => setConfirmRemove(true)}
+          title="Remove from project"
+          className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+        >
+          <UserMinus size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId }) => {
@@ -1279,6 +1589,16 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
   const [tokenError, setTokenError]       = useState('')
   const [tokenSuccess, setTokenSuccess]   = useState(false)
 
+  // Tracking docs
+  const [trackingDocs, setTrackingDocs]         = useState<any[]>([])
+  const [trackingDocsLoading, setTrackingDocsLoading] = useState(false)
+  const [liveStats, setLiveStats]               = useState<any[]>([])
+  const [liveLoading, setLiveLoading]           = useState(false)
+  const [trackingForm, setTrackingForm]         = useState({ url: '', title: '', api_key: '' })
+  const [trackingAdding, setTrackingAdding]     = useState(false)
+  const [trackingError, setTrackingError]       = useState('')
+  const [showTrackingForm, setShowTrackingForm] = useState(false)
+
   const loadProject = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -1298,6 +1618,9 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
     if (activeTab === 'repo' && project?.repo_url) {
       fetchCommits()
       fetchContribs()
+    }
+    if (activeTab === 'tracking' && project?.id) {
+      loadTrackingDocs()
     }
   }, [activeTab, project?.id])
 
@@ -1328,6 +1651,50 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
     } finally {
       setContribLoading(false)
     }
+  }
+
+  const loadTrackingDocs = async () => {
+    if (!project?.id) return
+    setTrackingDocsLoading(true)
+    try {
+      const r = await api.get(`/projects/${project.id}/tracking-docs`)
+      setTrackingDocs(r.data.tracking_docs || [])
+    } catch { /* ignore */ }
+    finally { setTrackingDocsLoading(false) }
+  }
+
+  const fetchLiveStats = async () => {
+    if (!project?.id) return
+    setLiveLoading(true)
+    try {
+      const r = await api.get(`/projects/${project.id}/tracking-docs/live`)
+      setLiveStats(r.data.docs || [])
+    } catch { /* ignore */ }
+    finally { setLiveLoading(false) }
+  }
+
+  const addTrackingDoc = async () => {
+    if (!trackingForm.url.trim()) return
+    setTrackingAdding(true)
+    setTrackingError('')
+    try {
+      await api.post(`/projects/${project.id}/tracking-docs`, trackingForm)
+      setTrackingForm({ url: '', title: '', api_key: '' })
+      setShowTrackingForm(false)
+      await loadTrackingDocs()
+    } catch (err: any) {
+      setTrackingError(err?.response?.data?.detail || 'Failed to add tracking doc')
+    } finally {
+      setTrackingAdding(false)
+    }
+  }
+
+  const removeTrackingDoc = async (docId: string) => {
+    try {
+      await api.delete(`/projects/${project.id}/tracking-docs/${docId}`)
+      setTrackingDocs(prev => prev.filter(d => d.id !== docId))
+      setLiveStats(prev => prev.filter(d => d.id !== docId))
+    } catch { /* ignore */ }
   }
 
   const openEdit = () => {
@@ -1436,13 +1803,14 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
   const currentPhaseTotal = currentPhaseStages.length
 
   const TABS = [
-    { key: 'overview', label: 'Overview',    icon: <BarChart2 size={13} /> },
-    { key: 'phases',   label: `Phases${currentPhaseTotal > 0 ? ` (${currentPhaseDone}/${currentPhaseTotal})` : ''}`, icon: <ListChecks size={13} /> },
-    { key: 'members',  label: `Members (${project.members?.length || 0})`,  icon: <Users size={13} /> },
-    { key: 'tasks',    label: `Tasks (${totalTasks})`,    icon: <CheckCircle2 size={13} /> },
-    { key: 'repo',     label: 'Repository',  icon: <GitBranch size={13} /> },
-    { key: 'tools',    label: `Tools (${project.tools?.length || 0})`, icon: <Wrench size={13} /> },
-    { key: 'links',    label: 'Links',       icon: <Link2 size={13} /> },
+    { key: 'overview',  label: 'Overview',    icon: <BarChart2 size={13} /> },
+    { key: 'phases',    label: `Phases${currentPhaseTotal > 0 ? ` (${currentPhaseDone}/${currentPhaseTotal})` : ''}`, icon: <ListChecks size={13} /> },
+    { key: 'members',   label: `Members (${project.members?.length || 0})`,  icon: <Users size={13} /> },
+    { key: 'tasks',     label: `Tasks (${totalTasks})`,    icon: <CheckCircle2 size={13} /> },
+    { key: 'repo',      label: 'Repository',  icon: <GitBranch size={13} /> },
+    { key: 'tools',     label: `Tools (${project.tools?.length || 0})`, icon: <Wrench size={13} /> },
+    { key: 'links',     label: 'Links',       icon: <Link2 size={13} /> },
+    ...(canManage ? [{ key: 'tracking', label: 'Tracking', icon: <Activity size={13} /> }] : []),
   ]
 
   return (
@@ -1762,97 +2130,12 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
 
           {/* ── Members ── */}
           {activeTab === 'members' && (
-            <div className="animate-fade-in space-y-5">
-              {/* Project Manager */}
-              {project.pm && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                    <Shield size={11} className="text-indigo-500" /> Project Manager
-                  </p>
-                  <div
-                    onClick={() => navigate(`/users/${project.pm.id}`)}
-                    className="inline-flex items-center gap-3 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-2xl cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all"
-                  >
-                    <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-base shrink-0 shadow-sm">
-                      {project.pm.name[0]}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold text-gray-900">{project.pm.name}</p>
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-600 text-white">PM</span>
-                      </div>
-                      <p className="text-xs text-indigo-500 mt-0.5">{project.pm.email}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Team Leads */}
-              {project.members?.filter((m: any) => m.role === 'team_lead').length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                    <Shield size={11} className="text-teal-500" /> Team Leads
-                    <span className="ml-1 bg-teal-100 text-teal-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                      {project.members.filter((m: any) => m.role === 'team_lead').length}
-                    </span>
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {project.members.filter((m: any) => m.role === 'team_lead').map((m: any) => (
-                      <div key={m.id} onClick={() => navigate(`/users/${m.id}`)}
-                        className="flex items-center gap-3 p-4 bg-teal-50 border border-teal-200 rounded-2xl cursor-pointer hover:border-teal-400 hover:shadow-sm transition-all group"
-                      >
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white font-bold shrink-0">
-                          {m.name[0]}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-semibold text-gray-800 truncate">{m.name}</p>
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-teal-500 text-white shrink-0">TL</span>
-                          </div>
-                          {m.department && <p className="text-xs text-gray-500 truncate">{m.department}</p>}
-                          {m.email && <p className="text-xs text-teal-600 truncate">{m.email}</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Employees & others */}
-              {project.members?.filter((m: any) => m.role !== 'team_lead').length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                    <Users size={11} /> Employees
-                    <span className="ml-1 bg-gray-100 text-gray-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                      {project.members.filter((m: any) => m.role !== 'team_lead').length}
-                    </span>
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {project.members.filter((m: any) => m.role !== 'team_lead').map((m: any) => (
-                      <div key={m.id} onClick={() => navigate(`/users/${m.id}`)}
-                        className="flex items-center gap-3 p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:border-blue-200 hover:bg-blue-50/30 transition-colors cursor-pointer group"
-                      >
-                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${getGrad(m.name)} flex items-center justify-center text-white font-bold shrink-0`}>
-                          {m.name[0]}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-800 truncate">{m.name}</p>
-                          <p className="text-xs text-gray-400 capitalize truncate">{m.role?.replace('_', ' ')}{m.department ? ` · ${m.department}` : ''}</p>
-                          {m.email && <p className="text-xs text-blue-400 truncate">{m.email}</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {(!project.pm && (!project.members || project.members.length === 0)) && (
-                <div className="flex flex-col items-center justify-center h-48 text-gray-400">
-                  <Users size={28} className="mb-2 text-gray-200" />
-                  <p className="text-sm">No members added yet</p>
-                </div>
-              )}
-            </div>
+            <MembersTab
+              project={project}
+              projectId={projectId}
+              canManage={canManage}
+              onMemberChange={loadProject}
+            />
           )}
 
           {/* ── Tasks ── */}
@@ -2127,6 +2410,176 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
                   <p className="text-sm">No links added yet</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── Tracking Docs ── */}
+          {activeTab === 'tracking' && canManage && (
+            <div className="animate-fade-in space-y-5">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800">Google Sheets & Docs Tracking</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Track edit activity for performance analytics</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchLiveStats}
+                    disabled={liveLoading || trackingDocs.length === 0}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-40 transition-colors"
+                  >
+                    <RefreshCw size={12} className={liveLoading ? 'animate-spin' : ''} />
+                    {liveLoading ? 'Fetching…' : 'Fetch Live Stats'}
+                  </button>
+                  <button
+                    onClick={() => setShowTrackingForm(v => !v)}
+                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                  >
+                    <Plus size={12} /> Add Doc
+                  </button>
+                </div>
+              </div>
+
+              {/* Add form */}
+              {showTrackingForm && (
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 space-y-3">
+                  <h4 className="text-xs font-semibold text-gray-700">Add Google Sheet / Doc</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Google Sheets / Docs URL *</label>
+                      <input
+                        value={trackingForm.url}
+                        onChange={e => setTrackingForm(f => ({ ...f, url: e.target.value }))}
+                        placeholder="https://docs.google.com/spreadsheets/d/..."
+                        className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Title (optional)</label>
+                      <input
+                        value={trackingForm.title}
+                        onChange={e => setTrackingForm(f => ({ ...f, title: e.target.value }))}
+                        placeholder="Sprint Tracker"
+                        className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Google Drive API Key
+                        <span className="ml-1 text-gray-400 font-normal">(needed for live stats)</span>
+                      </label>
+                      <input
+                        value={trackingForm.api_key}
+                        onChange={e => setTrackingForm(f => ({ ...f, api_key: e.target.value }))}
+                        placeholder="AIzaSy..."
+                        type="password"
+                        className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      />
+                    </div>
+                  </div>
+                  {trackingError && <p className="text-xs text-red-500">{trackingError}</p>}
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      onClick={addTrackingDoc}
+                      disabled={trackingAdding || !trackingForm.url.trim()}
+                      className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {trackingAdding ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                      Save
+                    </button>
+                    <button
+                      onClick={() => { setShowTrackingForm(false); setTrackingError('') }}
+                      className="text-xs text-gray-500 hover:text-gray-800 px-3 py-2"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Doc list */}
+              {trackingDocsLoading ? (
+                <div className="flex items-center justify-center h-24 text-gray-400 text-xs gap-2">
+                  <Loader2 size={14} className="animate-spin" /> Loading…
+                </div>
+              ) : trackingDocs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-gray-400">
+                  <Activity size={28} className="mb-2 text-gray-200" />
+                  <p className="text-sm">No tracking docs yet</p>
+                  <p className="text-xs text-gray-300 mt-1">Add a Google Sheet or Doc to track edit activity</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {trackingDocs.map(doc => {
+                    const live = liveStats.find(s => s.id === doc.id)
+                    const typeColor: Record<string, string> = {
+                      sheets: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                      docs:   'bg-blue-100 text-blue-700 border-blue-200',
+                      slides: 'bg-amber-100 text-amber-700 border-amber-200',
+                      other:  'bg-gray-100 text-gray-600 border-gray-200',
+                    }
+                    return (
+                      <div key={doc.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold border ${typeColor[doc.doc_type] || typeColor.other}`}>
+                            {doc.doc_type === 'sheets' ? 'SH' : doc.doc_type === 'docs' ? 'DO' : doc.doc_type === 'slides' ? 'SL' : '??'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-gray-800 truncate">{doc.title}</p>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md border capitalize ${typeColor[doc.doc_type] || typeColor.other}`}>
+                                {doc.doc_type}
+                              </span>
+                              {!doc.has_api_key && (
+                                <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md">
+                                  no API key
+                                </span>
+                              )}
+                            </div>
+                            <a href={doc.url} target="_blank" rel="noopener noreferrer"
+                               className="text-xs text-blue-500 hover:underline truncate block mt-0.5">
+                              {doc.url}
+                            </a>
+                            {live && (
+                              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                                {live.stats?.error ? (
+                                  <span className="text-red-500">{live.stats.error}</span>
+                                ) : (
+                                  <>
+                                    <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+                                      <Activity size={11} /> {live.stats?.version ?? '—'} edits
+                                    </span>
+                                    {live.stats?.last_modifier && (
+                                      <span className="text-gray-500">Last: {live.stats.last_modifier}</span>
+                                    )}
+                                    {live.stats?.modified_time && (
+                                      <span className="text-gray-400">
+                                        {new Date(live.stats.modified_time).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => removeTrackingDoc(doc.id)}
+                            className="shrink-0 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Info note */}
+              <div className="rounded-xl bg-blue-50 border border-blue-100 p-4 text-xs text-blue-700">
+                <p className="font-semibold mb-1">How it works</p>
+                <p>The "edit count" is the document's version number from the Google Drive API, which increments with each save. PM analytics automatically include this data when calculating the performance score. Files must be shared publicly or via domain to use an API key.</p>
+              </div>
             </div>
           )}
         </>

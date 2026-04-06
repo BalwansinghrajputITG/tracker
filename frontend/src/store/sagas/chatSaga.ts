@@ -2,11 +2,13 @@ import { call, put, takeLatest, take, fork, cancel, select } from 'redux-saga/ef
 import { Task } from '@redux-saga/types'
 import { eventChannel, END } from 'redux-saga'
 import {
-  fetchRoomsRequest, fetchRoomsSuccess, fetchMessagesRequest,
-  fetchMessagesSuccess, sendMessageRequest, receiveMessage,
-  setTyping, clearTyping, setConnected, setActiveRoom,
+  fetchRoomsRequest, fetchRoomsSuccess, fetchRoomsFailure,
+  fetchMessagesRequest, fetchMessagesSuccess, fetchMessagesFailure,
+  sendMessageRequest, sendMessageFailure,
+  receiveMessage, setTyping, clearTyping, setConnected, setActiveRoom,
   fetchContactsRequest, fetchContactsSuccess,
 } from '../slices/chatSlice'
+import { markChatRoomReadLocal } from '../slices/notificationsSlice'
 import { api } from '../../utils/api'
 import { RootState } from '../index'
 
@@ -23,14 +25,18 @@ function* handleFetchRooms() {
   try {
     const response: any = yield call(api.get, '/chat/rooms')
     yield put(fetchRoomsSuccess(response.data.rooms))
-  } catch {}
+  } catch (err: any) {
+    yield put(fetchRoomsFailure(err?.response?.data?.detail || 'Failed to load chat rooms'))
+  }
 }
 
 function* handleFetchContacts() {
   try {
     const response: any = yield call(api.get, '/chat/contacts')
     yield put(fetchContactsSuccess(response.data.contacts))
-  } catch {}
+  } catch {
+    // Contacts are non-critical — silently ignore; rooms still function
+  }
 }
 
 function* handleFetchMessages(action: ReturnType<typeof fetchMessagesRequest>) {
@@ -39,7 +45,13 @@ function* handleFetchMessages(action: ReturnType<typeof fetchMessagesRequest>) {
     const params = before ? { before, limit: 50 } : { limit: 50 }
     const response: any = yield call(api.get, `/chat/rooms/${roomId}/messages`, { params })
     yield put(fetchMessagesSuccess({ roomId, messages: response.data.messages }))
-  } catch {}
+    // Clear message notifications for this room (user is reading the messages)
+    if (!before) {
+      yield put(markChatRoomReadLocal(roomId))
+    }
+  } catch (err: any) {
+    yield put(fetchMessagesFailure(err?.response?.data?.detail || 'Failed to load messages'))
+  }
 }
 
 function* handleSendMessage(action: ReturnType<typeof sendMessageRequest>) {
@@ -59,7 +71,9 @@ function* handleSendMessage(action: ReturnType<typeof sendMessageRequest>) {
       read_by: [],
       mentions,
     }))
-  } catch {}
+  } catch (err: any) {
+    yield put(sendMessageFailure(err?.response?.data?.detail || 'Failed to send message'))
+  }
 }
 
 function* watchWebSocket(roomId: string, token: string) {

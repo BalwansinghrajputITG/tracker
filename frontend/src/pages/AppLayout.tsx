@@ -5,13 +5,14 @@ import { RootState } from '../store'
 import { Sidebar } from '../components/common/Sidebar'
 import { NotificationBell } from '../components/common/NotificationBell'
 import { Chatbot } from '../components/chatbot/Chatbot'
+import { CursorEffect } from '../components/common/CursorEffect'
 import { CEODashboard } from '../components/dashboards/CEODashboard'
 import { EmployeeDashboard } from '../components/dashboards/EmployeeDashboard'
+import { TeamLeadDashboard } from '../components/dashboards/TeamLeadDashboard'
 import { ChatPanel } from '../components/chat/ChatPanel'
 import { ProjectsPage } from './ProjectsPage'
 import { TasksPage } from './TasksPage'
 import { ReportsPage } from './ReportsPage'
-import { TeamsPage } from './TeamsPage'
 import { AnalyticsPage } from './AnalyticsPage'
 import { DigitalMarketingPage } from './DigitalMarketingPage'
 import { SettingsPage } from './SettingsPage'
@@ -20,6 +21,7 @@ import { ProjectDetailPage } from './ProjectDetailPage'
 import { UserProfilePage } from './UserProfilePage'
 import { CreateProjectPage } from './CreateProjectPage'
 import SheetsPage from './SheetsPage'
+import PersonalPage from './PersonalPage'
 
 function useCurrentPath() {
   const [path, setPath] = useState(window.location.pathname)
@@ -39,8 +41,9 @@ export function navigate(to: string) {
 const ROLE_DASHBOARDS: Record<string, React.ReactNode> = {
   ceo:       <CEODashboard />,
   coo:       <CEODashboard />,
+  admin:     <CEODashboard />,
   pm:        <EmployeeDashboard />,
-  team_lead: <EmployeeDashboard />,
+  team_lead: <TeamLeadDashboard />,
   employee:  <EmployeeDashboard />,
 }
 
@@ -52,10 +55,10 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
   '/projects/:id': { title: 'Project Detail', sub: 'Full project overview & analytics'     },
   '/tasks':     { title: 'Tasks',      sub: 'View and update task statuses'    },
   '/reports':   { title: 'Reports',    sub: 'Daily work reports & compliance'  },
-  '/teams':     { title: 'Teams',      sub: 'Team composition & performance'   },
   '/users':     { title: 'Users',      sub: 'Workforce management'             },
   '/chat':      { title: 'Messages',   sub: 'Direct messages & conversations'  },
-  '/sheets':             { title: 'Sheets',             sub: 'Track calls, updates & project details'            },
+  '/sheets':             { title: 'Document Hub',        sub: 'Links to Docs, Sheets, Slides & PDFs'             },
+  '/personal':           { title: 'My Workspace',       sub: 'Links, notes, targets, performance & documents'    },
   '/analytics':          { title: 'Analytics',          sub: 'Company-wide performance data'                     },
   '/digital-marketing':  { title: 'Digital Marketing',  sub: 'Marketing performance & campaign insights'         },
   '/settings':  { title: 'Settings',   sub: 'Account & preferences'            },
@@ -63,6 +66,7 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
 
 export const AppLayout: React.FC = () => {
   const { user } = useSelector((s: RootState) => s.auth)
+  const themeMode = useSelector((s: RootState) => s.theme?.mode || 'light')
   const currentPath = useCurrentPath()
   const role = user?.primary_role || 'employee'
   const isCreateProject = currentPath === '/projects/new'
@@ -70,6 +74,13 @@ export const AppLayout: React.FC = () => {
   const isUserProfile   = currentPath.startsWith('/users/') && currentPath !== '/users'
   const pageMeta = PAGE_META[currentPath] || (isProjectDetail ? PAGE_META['/projects/:id'] : isUserProfile ? { title: 'User Profile', sub: 'Full user overview' } : { title: 'Dashboard', sub: '' })
   const [contentKey, setContentKey] = useState(0)
+
+  // Apply theme class to <html>
+  useEffect(() => {
+    const html = document.documentElement
+    html.classList.remove('dark', 'midnight')
+    if (themeMode !== 'light') html.classList.add(themeMode)
+  }, [themeMode])
 
   const refresh = () => setContentKey(k => k + 1)
 
@@ -85,11 +96,12 @@ export const AppLayout: React.FC = () => {
       return <UserProfilePage userId={userId} />
     }
     if (currentPath === '/projects')  return <ProjectsPage />
-    if (currentPath === '/tasks')     return <TasksPage />
+    if (currentPath === '/tasks')     return role === 'employee' ? (ROLE_DASHBOARDS[role] || <EmployeeDashboard />) : <TasksPage />
     if (currentPath === '/reports')   return <ReportsPage />
-    if (currentPath === '/teams')     return <TeamsPage />
+    if (currentPath === '/teams')     return <UsersPage />
     if (currentPath === '/users')     return <UsersPage />
     if (currentPath === '/sheets')            return <SheetsPage />
+    if (currentPath === '/personal')          return <PersonalPage />
     if (currentPath === '/analytics')         return <AnalyticsPage />
     if (currentPath === '/digital-marketing') return <DigitalMarketingPage />
     if (currentPath === '/settings')  return <SettingsPage />
@@ -158,6 +170,7 @@ export const AppLayout: React.FC = () => {
       </div>
 
       {['ceo', 'coo', 'pm', 'team_lead'].includes(role) && <Chatbot />}
+      <CursorEffect />
     </div>
   )
 }

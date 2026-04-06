@@ -146,27 +146,43 @@ async def list_rooms(
         "is_active": True,
     }).sort("last_message_at", -1)
 
-    uid = str(current_user["_id"])
+    uid_oid = current_user["_id"]
+    uid = str(uid_oid)
+    raw_rooms = [r async for r in cursor]
+
+    # Collect other-participant ObjectIds for direct rooms (before stringifying)
+    direct_other_map: dict = {}  # room _id → other participant ObjectId
+    for r in raw_rooms:
+        if r.get("type") == "direct":
+            other = next((p for p in r.get("participants", []) if p != uid_oid), None)
+            if other:
+                direct_other_map[r["_id"]] = other
+
+    # Batch-fetch all other users in one query
+    user_info: dict = {}
+    if direct_other_map:
+        async for u in db.users.find(
+            {"_id": {"$in": list(direct_other_map.values())}},
+            {"full_name": 1, "primary_role": 1},
+        ):
+            user_info[u["_id"]] = u
+
     rooms = []
-    async for r in cursor:
+    for r in raw_rooms:
+        room_oid = r["_id"]
         r["id"] = str(r.pop("_id"))
         r["participants"] = [str(p) for p in r.get("participants", [])]
         r["created_by"] = str(r["created_by"]) if r.get("created_by") else None
         r["team_id"] = str(r["team_id"]) if r.get("team_id") else None
         r["project_id"] = str(r["project_id"]) if r.get("project_id") else None
 
-        # For direct rooms: resolve the other person's name/role for display
         if r["type"] == "direct":
-            other_id = next((p for p in r["participants"] if p != uid), None)
-            if other_id:
-                other = await db.users.find_one(
-                    {"_id": ObjectId(other_id)},
-                    {"full_name": 1, "primary_role": 1},
-                )
-                if other:
-                    r["name"] = other.get("full_name", "Direct Message")
-                    r["other_user_role"] = other.get("primary_role", "")
-                    r["other_user_id"] = other_id
+            other_oid = direct_other_map.get(room_oid)
+            if other_oid and other_oid in user_info:
+                other = user_info[other_oid]
+                r["name"] = other.get("full_name", "Direct Message")
+                r["other_user_role"] = other.get("primary_role", "")
+                r["other_user_id"] = str(other_oid)
 
         if r.get("last_message_at"):
             r["last_message_at"] = r["last_message_at"].isoformat()
@@ -241,7 +257,18 @@ async def get_messages(
 
     await db.chat_messages.update_many(
         {"room_id": ObjectId(room_id), "read_by": {"$ne": current_user["_id"]}},
-        {"$push": {"read_by": current_user["_id"]}},
+        {"$addToSet": {"read_by": current_user["_id"]}},
+    )
+
+    # Mark message notifications for this room as read
+    await db.notifications.update_many(
+        {
+            "user_id": current_user["_id"],
+            "type": "message",
+            "reference_id": room_id,
+            "is_read": False,
+        },
+        {"$set": {"is_read": True}},
     )
 
     return {"messages": messages}
@@ -295,10 +322,29 @@ async def send_message(
     }
     await connection_manager.broadcast_to_room(room_id, payload)
 
-    if body.mentions:
+    # Notify all room participants (except sender) about the new message
+    recipient_ids = [
+        str(p) for p in room["participants"]
+        if p != current_user["_id"]
+    ]
+    if recipient_ids:
         await notify_users(
             db=db,
-            user_ids=body.mentions,
+            user_ids=recipient_ids,
+            notification_type="message",
+            title=f"New message from {current_user['full_name']}",
+            body=body.content[:80],
+            reference_id=room_id,
+            reference_type="room",
+        )
+
+    # If there are mentions, also send a mention notification
+    if body.mentions:
+        mention_recipients = [m for m in body.mentions if m not in recipient_ids]
+        targets = mention_recipients if mention_recipients else body.mentions
+        await notify_users(
+            db=db,
+            user_ids=targets,
             notification_type="mention",
             title=f"{current_user['full_name']} mentioned you",
             body=body.content[:80],

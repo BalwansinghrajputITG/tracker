@@ -182,6 +182,30 @@ async def list_reports(
         r["user_department"] = info.get("department", "")
         r["user_role"]       = info.get("role", "")
 
+    # Enrich with project names (batch lookup)
+    pid_strings = list({r["project_id"] for r in reports if r.get("project_id")})
+    projects_map: dict = {}
+    if pid_strings:
+        async for p in db.projects.find(
+            {"_id": {"$in": [ObjectId(pid) for pid in pid_strings]}},
+            {"name": 1},
+        ):
+            projects_map[str(p["_id"])] = p.get("name", "Unknown Project")
+    for r in reports:
+        r["project_name"] = projects_map.get(r.get("project_id", ""), "Unknown Project")
+
+    # Enrich reviewed_by with reviewer name (batch lookup)
+    reviewer_ids = list({r["reviewed_by"] for r in reports if r.get("reviewed_by")})
+    reviewers_map: dict = {}
+    if reviewer_ids:
+        async for u in db.users.find(
+            {"_id": {"$in": [ObjectId(rid) for rid in reviewer_ids]}},
+            {"full_name": 1},
+        ):
+            reviewers_map[str(u["_id"])] = u["full_name"]
+    for r in reports:
+        r["reviewed_by_name"] = reviewers_map.get(r.get("reviewed_by", ""), None)
+
     return {"reports": reports, "total": total, "page": page, "limit": limit}
 
 

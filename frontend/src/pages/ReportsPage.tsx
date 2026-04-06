@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   FileText, Plus, X, CheckCircle2, AlertTriangle, ArrowRight,
@@ -42,13 +42,15 @@ export const ReportsPage: React.FC = () => {
 
   const [page, setPage]   = useState(1)
   const [limit, setLimit] = useState(10)
-  const [activeTab, setActiveTab] = useState<'reports' | 'submit' | 'missing'>('reports')
+  const [activeTab, setActiveTab] = useState<'reports' | 'missing'>('reports')
+  const [submitOpen, setSubmitOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [selectedReport, setSelectedReport] = useState<any>(null)
   const [reportConfirmDelete, setReportConfirmDelete] = useState(false)
   const [reportDeleteLoading, setReportDeleteLoading] = useState(false)
   const [reportDeleteError, setReportDeleteError] = useState('')
   const [submitBanner, setSubmitBanner] = useState(false)
+  const submitBannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState<any>(null)
   const [editLoading, setEditLoading] = useState(false)
@@ -65,11 +67,17 @@ export const ReportsPage: React.FC = () => {
   useEffect(() => {
     if (submitSuccess) {
       setForm(emptyForm)
+      setSubmitOpen(false)
       setSubmitBanner(true)
       setActiveTab('reports')
-      dispatch(fetchReportsRequest({ page, limit }))
+      setPage(1)
+      dispatch(fetchReportsRequest({ page: 1, limit }))
       dispatch(resetSubmitStatus())
-      setTimeout(() => setSubmitBanner(false), 4000)
+      if (submitBannerTimer.current) clearTimeout(submitBannerTimer.current)
+      submitBannerTimer.current = setTimeout(() => setSubmitBanner(false), 4000)
+    }
+    return () => {
+      if (submitBannerTimer.current) clearTimeout(submitBannerTimer.current)
     }
   }, [submitSuccess])
 
@@ -90,10 +98,9 @@ export const ReportsPage: React.FC = () => {
     dispatch(submitReportRequest(payload))
   }
 
-  type ReportTab = 'reports' | 'submit' | 'missing'
+  type ReportTab = 'reports' | 'missing'
   const tabs: Array<{ key: ReportTab; label: string }> = [
     { key: 'reports', label: 'All Reports' },
-    { key: 'submit',  label: 'Submit Report' },
     ...(isManager ? [{ key: 'missing' as ReportTab, label: `Missing (${missing.length})` }] : []),
   ]
 
@@ -144,6 +151,14 @@ export const ReportsPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
           <p className="text-gray-500 text-sm mt-1">{total} total reports</p>
         </div>
+        <button
+          onClick={() => setSubmitOpen(true)}
+          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition-all shadow-sm"
+        >
+          <Plus size={15} />
+          <span className="hidden sm:inline">Submit Report</span>
+          <span className="sm:hidden">Submit</span>
+        </button>
       </div>
 
       {/* Tabs */}
@@ -191,7 +206,6 @@ export const ReportsPage: React.FC = () => {
             </div>
           ) : (
             items.map((report, i) => {
-              const project = projects.find(p => p.id === report.project_id)
               const mood = getMood(report.mood)
               return (
                 <div
@@ -203,7 +217,7 @@ export const ReportsPage: React.FC = () => {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-semibold text-gray-800">{project?.name || report.project_id}</span>
+                        <span className="text-sm font-semibold text-gray-800">{report.project_name || 'Unknown Project'}</span>
                         {report.is_late_submission && (
                           <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-lg font-medium">Late</span>
                         )}
@@ -257,76 +271,141 @@ export const ReportsPage: React.FC = () => {
         />
       )}
 
-      {/* Submit Form */}
-      {activeTab === 'submit' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-5 max-w-2xl animate-fade-in-up">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center">
-              <FileText size={15} className="text-emerald-600" />
-            </div>
-            <h2 className="text-base font-semibold text-gray-800">Daily Report</h2>
-          </div>
+      {/* Submit Report Modal */}
+      {submitOpen && (
+        <Modal onClose={() => { if (!submitLoading) { setSubmitOpen(false); setForm(emptyForm) } }}>
+          <div className="bg-white rounded-2xl w-full max-w-xl mx-auto shadow-2xl animate-scale-in flex flex-col"
+               style={{ maxHeight: 'calc(100vh - 2rem)' }}>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Project *</label>
-              <select value={form.project_id} onChange={e => setForm({ ...form, project_id: e.target.value })} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50">
-                <option value="">Select project...</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center shrink-0">
+                  <FileText size={15} className="text-emerald-600" />
+                </div>
+                <h2 className="text-base font-semibold text-gray-900">Submit Daily Report</h2>
+              </div>
+              <button
+                onClick={() => { if (!submitLoading) { setSubmitOpen(false); setForm(emptyForm) } }}
+                className="w-8 h-8 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors shrink-0"
+              >
+                <X size={16} />
+              </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Report Date</label>
-              <input type="date" value={form.report_date} max={new Date().toISOString().split('T')[0]} onChange={e => setForm({ ...form, report_date: e.target.value })} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50" />
-            </div>
-          </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Hours Worked</label>
-            <input type="number" value={form.hours_worked} min={0} max={24} onChange={e => setForm({ ...form, hours_worked: Number(e.target.value) })} className="w-28 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50" />
-          </div>
+            {/* Scrollable Body */}
+            <div className="overflow-y-auto flex-1 px-5 py-5 space-y-4">
+              {submitError && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-700 text-sm px-4 py-3 rounded-xl">
+                  <AlertTriangle size={13} className="shrink-0" />
+                  {submitError}
+                </div>
+              )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Mood</label>
-            <div className="flex gap-2 flex-wrap">
-              {MOOD_OPTIONS.map(m => (
-                <button
-                  key={m.value}
-                  onClick={() => setForm({ ...form, mood: m.value })}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border font-medium transition-all hover:scale-105 ${
-                    form.mood === m.value ? m.color + ' shadow-sm' : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}
-                >
-                  {m.icon} {m.label}
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Project <span className="text-red-500">*</span></label>
+                  <select
+                    value={form.project_id}
+                    onChange={e => setForm({ ...form, project_id: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
+                  >
+                    <option value="">Select project...</option>
+                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Report Date</label>
+                  <input
+                    type="date"
+                    value={form.report_date}
+                    max={new Date().toISOString().split('T')[0]}
+                    onChange={e => setForm({ ...form, report_date: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Hours Worked</label>
+                <input
+                  type="number"
+                  value={form.hours_worked}
+                  min={0} max={24}
+                  onChange={e => setForm({ ...form, hours_worked: Number(e.target.value) })}
+                  className="w-28 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Mood</label>
+                <div className="flex gap-2 flex-wrap">
+                  {MOOD_OPTIONS.map(m => (
+                    <button
+                      key={m.value}
+                      onClick={() => setForm({ ...form, mood: m.value })}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border font-medium transition-all ${
+                        form.mood === m.value ? m.color + ' shadow-sm' : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      {m.icon} {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {[
+                { label: 'Tasks Completed', key: 'tasks_completed', placeholder: 'Finished login UI\nFixed auth bug' },
+                { label: 'Planned for Tomorrow', key: 'tasks_planned', placeholder: 'Implement dashboard' },
+                { label: 'Blockers', key: 'blockers', placeholder: 'Waiting for API spec' },
+              ].map(({ label, key, placeholder }) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {label}
+                    <span className="text-xs text-gray-400 font-normal ml-1">(one per line)</span>
+                  </label>
+                  <textarea
+                    value={(form as any)[key]}
+                    onChange={e => setForm({ ...form, [key]: e.target.value })}
+                    placeholder={placeholder}
+                    rows={3}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-all resize-none"
+                  />
+                </div>
               ))}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Additional Notes</label>
+                <textarea
+                  value={form.unstructured_notes}
+                  onChange={e => setForm({ ...form, unstructured_notes: e.target.value })}
+                  placeholder="Any context or observations..."
+                  rows={3}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-all resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100 shrink-0">
+              <button
+                onClick={() => setForm(emptyForm)}
+                disabled={submitLoading}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium disabled:opacity-40"
+              >
+                Reset
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!form.project_id || submitLoading}
+                className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all"
+              >
+                {submitLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                {submitLoading ? 'Submitting...' : 'Submit Report'}
+              </button>
             </div>
           </div>
-
-          {[
-            { label: 'Tasks Completed (one per line)', key: 'tasks_completed', placeholder: 'Finished login UI\nFixed auth bug' },
-            { label: 'Planned for Tomorrow (one per line)', key: 'tasks_planned', placeholder: 'Implement dashboard' },
-            { label: 'Blockers (one per line)', key: 'blockers', placeholder: 'Waiting for API spec' },
-          ].map(({ label, key, placeholder }) => (
-            <div key={key}>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-              <textarea value={(form as any)[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} placeholder={placeholder} rows={3} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-all resize-none" />
-            </div>
-          ))}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Additional Notes</label>
-            <textarea value={form.unstructured_notes} onChange={e => setForm({ ...form, unstructured_notes: e.target.value })} placeholder="Any context or observations..." rows={4} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 focus:bg-white transition-all resize-none" />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setForm(emptyForm)} disabled={submitLoading} className="px-5 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium disabled:opacity-40">Reset</button>
-            <button onClick={handleSubmit} disabled={!form.project_id || submitLoading} className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-all">
-              {submitLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              {submitLoading ? 'Submitting...' : 'Submit Report'}
-            </button>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Missing Reports */}
@@ -374,14 +453,15 @@ export const ReportsPage: React.FC = () => {
       {/* Report Detail Modal */}
       {selectedReport && (
         <Modal onClose={() => { setSelectedReport(null); setReportConfirmDelete(false); setReportDeleteError(''); setEditMode(false); setEditError('') }}>
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl animate-scale-in">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl animate-scale-in flex flex-col"
+               style={{ maxHeight: 'calc(100vh - 2rem)' }}>
 
             {/* Header */}
-            <div className="px-7 py-5 border-b border-gray-100 flex items-start justify-between gap-4">
+            <div className="px-5 sm:px-7 py-5 border-b border-gray-100 flex items-start justify-between gap-4 shrink-0">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-xl font-bold text-gray-900">
-                    {projects.find(p => p.id === selectedReport.project_id)?.name || 'Daily Report'}
+                    {selectedReport.project_name || 'Daily Report'}
                   </h2>
                   {selectedReport.is_late_submission && (
                     <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-lg font-semibold">Late</span>
@@ -416,7 +496,7 @@ export const ReportsPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="px-7 py-6 space-y-6">
+            <div className="px-5 sm:px-7 py-5 space-y-5 overflow-y-auto flex-1">
               {(reportDeleteError || editError) && (
                 <div className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-700 text-sm px-4 py-3 rounded-xl">
                   <AlertTriangle size={13} className="shrink-0" />
@@ -547,7 +627,12 @@ export const ReportsPage: React.FC = () => {
                   {/* Review comment */}
                   {selectedReport.review_comment && (
                     <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-                      <p className="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-1">Manager Review</p>
+                      <p className="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-1">
+                        Manager Review
+                        {selectedReport.reviewed_by_name && (
+                          <span className="ml-2 font-normal normal-case text-indigo-500">by {selectedReport.reviewed_by_name}</span>
+                        )}
+                      </p>
                       <p className="text-sm text-indigo-800">{selectedReport.review_comment}</p>
                     </div>
                   )}
@@ -586,7 +671,8 @@ export const ReportsPage: React.FC = () => {
                           await api.delete(`/reports/${selectedReport.id}`)
                           setSelectedReport(null)
                           setReportConfirmDelete(false)
-                          dispatch(fetchReportsRequest({}))
+                          setPage(1)
+                          dispatch(fetchReportsRequest({ page: 1, limit }))
                         } catch (err: any) {
                           setReportDeleteError(err?.response?.data?.detail || 'Failed to delete report')
                           setReportDeleteLoading(false)

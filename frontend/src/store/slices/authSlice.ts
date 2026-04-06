@@ -3,8 +3,12 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 interface User {
   user_id: string
   full_name: string
+  email?: string
   roles: string[]
   primary_role: string
+  department?: string
+  team_ids?: string[]
+  id?: string   // alias used in some legacy components
 }
 
 interface AuthState {

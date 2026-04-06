@@ -11,6 +11,7 @@ import teamsReducer from './slices/teamsSlice'
 import usersReducer from './slices/usersSlice'
 import digitalMarketingReducer from './slices/digitalMarketingSlice'
 import sheetsReducer from './slices/sheetsSlice'
+import themeReducer from './slices/themeSlice'
 
 const combinedReducer = combineReducers({
   auth: authReducer,
@@ -25,6 +26,7 @@ const combinedReducer = combineReducers({
   users: usersReducer,
   digitalMarketing: digitalMarketingReducer,
   sheets: sheetsReducer,
+  theme: themeReducer,
 })
 
 /**

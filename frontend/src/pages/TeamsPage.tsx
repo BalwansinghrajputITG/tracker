@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { Users, Plus, X, AlertCircle, Loader2, Crown, Briefcase, Pencil, Trash2, MessageSquare, CheckCircle2, Search, UserCheck, FolderKanban, ExternalLink } from 'lucide-react'
+import { Users, Plus, X, AlertCircle, Loader2, Crown, Briefcase, Pencil, Trash2, MessageSquare, CheckCircle2, Search, UserCheck, FolderKanban, ExternalLink, UserMinus, UserPlus } from 'lucide-react'
 import { Modal } from '../components/common/Modal'
 import { Pagination } from '../components/common/Pagination'
 import { UserPickerByRole } from '../components/common/UserPickerByRole'
@@ -59,13 +59,46 @@ export const TeamsPage: React.FC = () => {
   const [createError, setCreateError] = useState('')
   const [memberSearch, setMemberSearch] = useState('')
   const [form, setForm] = useState({ name: '', description: '', department: '', lead_id: '', pm_id: '', member_ids: [] as string[] })
+  const [quickAddSearch, setQuickAddSearch] = useState('')
+  const [quickAddLoading, setQuickAddLoading] = useState<string | null>(null)   // userId being added
+  const [removingMember, setRemovingMember] = useState<string | null>(null)     // userId being removed
+  const [showQuickAdd, setShowQuickAdd] = useState(false)
 
+  const isAdmin = ['ceo', 'coo'].includes(user?.primary_role || '')
   const canCreate = ['ceo', 'coo', 'pm', 'team_lead'].includes(user?.primary_role || '')
   const canManageTeam = (team?: any) => {
     const role = user?.primary_role || ''
     if (['ceo', 'coo', 'pm'].includes(role)) return true
     if (role === 'team_lead' && team) return team.lead_id === (user as any)?.id
     return false
+  }
+
+  const handleQuickRemove = async (teamId: string, userId: string) => {
+    setRemovingMember(userId)
+    setTeamActionError('')
+    try {
+      await api.delete(`/teams/${teamId}/members/${userId}`)
+      setSelectedTeam((t: any) => t ? { ...t, member_ids: t.member_ids.filter((id: string) => id !== userId) } : t)
+      dispatch(fetchTeamsRequest({ page, limit }))
+    } catch (err: any) {
+      setTeamActionError(err?.response?.data?.detail || 'Failed to remove member')
+    } finally {
+      setRemovingMember(null)
+    }
+  }
+
+  const handleQuickAdd = async (teamId: string, userId: string) => {
+    setQuickAddLoading(userId)
+    setTeamActionError('')
+    try {
+      await api.post(`/teams/${teamId}/members`, { user_ids: [userId] })
+      setSelectedTeam((t: any) => t ? { ...t, member_ids: [...(t.member_ids || []), userId] } : t)
+      dispatch(fetchTeamsRequest({ page, limit }))
+    } catch (err: any) {
+      setTeamActionError(err?.response?.data?.detail || 'Failed to add member')
+    } finally {
+      setQuickAddLoading(null)
+    }
   }
 
   useEffect(() => {
@@ -239,7 +272,7 @@ export const TeamsPage: React.FC = () => {
 
       {/* Team Detail Modal */}
       {selectedTeam && (
-        <Modal onClose={() => { setSelectedTeam(null); setTeamMode('view'); setTeamActionError(''); setTeamProjects([]) }}>
+        <Modal onClose={() => { setSelectedTeam(null); setTeamMode('view'); setTeamActionError(''); setTeamProjects([]); setShowQuickAdd(false); setQuickAddSearch('') }}>
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-scale-in">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between">
               <div>
@@ -284,27 +317,108 @@ export const TeamsPage: React.FC = () => {
                     </div>
                   )}
 
-                  {selectedTeam.member_ids?.length > 0 && (
+                  {(selectedTeam.member_ids?.length > 0 || canManageTeam(selectedTeam)) && (
                     <div>
-                      <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2">Members ({selectedTeam.member_ids.length})</p>
-                      <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                        {selectedTeam.member_ids.map((id: string) => {
-                          const memberUser = users.find(u => u.id === id)
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">
+                          Members ({selectedTeam.member_ids?.length || 0})
+                        </p>
+                        {canManageTeam(selectedTeam) && (
+                          <button
+                            onClick={() => { setShowQuickAdd(v => !v); setQuickAddSearch('') }}
+                            className="flex items-center gap-1 text-xs text-blue-600 font-medium hover:text-blue-700 transition-colors"
+                          >
+                            <UserPlus size={11} />
+                            {showQuickAdd ? 'Close' : 'Add Member'}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Quick Add Member panel */}
+                      {showQuickAdd && canManageTeam(selectedTeam) && (
+                        <div className="mb-3 bg-blue-50 rounded-xl p-3 border border-blue-100">
+                          <p className="text-xs font-medium text-blue-700 mb-2">Search & add a member</p>
+                          <input
+                            type="text"
+                            value={quickAddSearch}
+                            onChange={e => setQuickAddSearch(e.target.value)}
+                            placeholder="Search by name or department…"
+                            className="w-full border border-blue-200 rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 mb-2"
+                          />
+                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                            {allUsers
+                              .filter(u => {
+                                if (selectedTeam.member_ids?.includes(u.id)) return false
+                                if (!quickAddSearch.trim()) return true
+                                const q = quickAddSearch.toLowerCase()
+                                return u.full_name.toLowerCase().includes(q) || u.department?.toLowerCase().includes(q)
+                              })
+                              .slice(0, 8)
+                              .map(u => (
+                                <div key={u.id} className="flex items-center justify-between gap-2 py-1 px-1.5 rounded-lg hover:bg-white transition-colors">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className={`w-6 h-6 bg-gradient-to-br ${getGradient(u.full_name)} rounded-md flex items-center justify-center text-white text-xs font-bold shrink-0`}>
+                                      {u.full_name[0]}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-medium text-gray-700 truncate">{u.full_name}</p>
+                                      <p className="text-xs text-gray-400">{u.primary_role?.replace('_', ' ')}</p>
+                                    </div>
+                                  </div>
+                                  <button
+                                    disabled={quickAddLoading === u.id}
+                                    onClick={() => handleQuickAdd(selectedTeam.id, u.id)}
+                                    className="shrink-0 flex items-center gap-1 text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                                  >
+                                    {quickAddLoading === u.id ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
+                                    Add
+                                  </button>
+                                </div>
+                              ))}
+                            {allUsers.filter(u => !selectedTeam.member_ids?.includes(u.id)).length === 0 && (
+                              <p className="text-xs text-gray-400 text-center py-2">All users are already members</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {(selectedTeam.member_ids || []).map((id: string) => {
+                          const memberUser = users.find(u => u.id === id) || allUsers.find(u => u.id === id)
                           const name = getUserName(id)
+                          const isRemoving = removingMember === id
                           return (
-                            <div key={id} onClick={() => navigate(`/users/${id}`)} className="flex items-center gap-2.5 py-1.5 px-2 rounded-xl hover:bg-blue-50 transition-colors cursor-pointer">
-                              <div className={`w-7 h-7 bg-gradient-to-br ${getGradient(name)} rounded-lg flex items-center justify-center text-white text-xs font-bold`}>
-                                {name[0]}
+                            <div key={id} className="flex items-center gap-2.5 py-1.5 px-2 rounded-xl hover:bg-blue-50 transition-colors group">
+                              <div
+                                onClick={() => navigate(`/users/${id}`)}
+                                className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer"
+                              >
+                                <div className={`w-7 h-7 bg-gradient-to-br ${getGradient(name)} rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0`}>
+                                  {name[0]}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm text-gray-700 font-medium truncate">{name}</p>
+                                  {memberUser && (
+                                    <p className="text-xs text-gray-400">{memberUser.primary_role?.replace('_', ' ')} · {memberUser.department}</p>
+                                  )}
+                                </div>
                               </div>
-                              <div>
-                                <p className="text-sm text-gray-700 font-medium">{name}</p>
-                                {memberUser && (
-                                  <p className="text-xs text-gray-400">{memberUser.primary_role?.replace('_', ' ')} · {memberUser.department}</p>
-                                )}
-                              </div>
+                              {canManageTeam(selectedTeam) && (
+                                <button
+                                  disabled={isRemoving}
+                                  onClick={() => handleQuickRemove(selectedTeam.id, id)}
+                                  title="Remove from team"
+                                  className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 disabled:opacity-50 transition-all"
+                                >
+                                  {isRemoving ? <Loader2 size={11} className="animate-spin text-red-400" /> : <UserMinus size={11} />}
+                                </button>
+                              )}
                             </div>
                           )
                         })}
+                        {selectedTeam.member_ids?.length === 0 && (
+                          <p className="text-xs text-gray-400 italic py-1 px-2">No members yet. Use "Add Member" to assign people.</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -375,6 +489,7 @@ export const TeamsPage: React.FC = () => {
                           onClick={() => {
                             setEditTeamForm({ name: selectedTeam.name, description: selectedTeam.description || '', department: selectedTeam.department || '', lead_id: selectedTeam.lead_id || '', pm_id: selectedTeam.pm_id || '', member_ids: selectedTeam.member_ids || [] })
                             setEditMemberSearch('')
+                            setShowQuickAdd(false)
                             setTeamMode('edit')
                           }}
                           className="flex flex-col items-center gap-1.5 px-2 py-3 bg-blue-50 text-blue-600 rounded-xl text-xs font-medium hover:bg-blue-100 transition-colors"

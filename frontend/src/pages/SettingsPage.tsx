@@ -4,11 +4,13 @@ import {
   User, Lock, Shield, LogOut, Save, Eye, EyeOff,
   CheckCircle2, AlertCircle, Loader2, ChevronRight,
   Palette, Bot, Move, LockKeyhole, LockKeyholeOpen, RotateCcw, MapPin,
+  Sun, Moon, Sparkles, MousePointer2,
 } from 'lucide-react'
 import { RootState } from '../store'
 import { logout } from '../store/slices/authSlice'
 import { api } from '../utils/api'
 import { CHATBOT_POS_KEY, CHATBOT_LOCK_KEY } from '../components/chatbot/Chatbot'
+import { setThemeMode, setCursorStyle, ThemeMode, CursorStyle } from '../store/slices/themeSlice'
 
 const ROLE_COLORS: Record<string, string> = {
   ceo:       'from-purple-500 to-violet-600',
@@ -30,6 +32,9 @@ type TabKey = 'profile' | 'password' | 'account' | 'appearance'
 export const SettingsPage: React.FC = () => {
   const dispatch = useDispatch()
   const { user } = useSelector((s: RootState) => s.auth)
+
+  const themeMode   = useSelector((s: RootState) => s.theme?.mode   || 'light')
+  const cursorStyle = useSelector((s: RootState) => s.theme?.cursor || 'default')
 
   const [tab, setTab] = useState<TabKey>('profile')
   const [profileForm, setProfileForm] = useState({ full_name: user?.full_name || '' })
@@ -292,8 +297,201 @@ export const SettingsPage: React.FC = () => {
       {tab === 'appearance' && (
         <div className="space-y-4 animate-fade-in">
 
-          {/* AI Button Position Card */}
+          {/* ── Theme Picker ── */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-violet-50 rounded-xl flex items-center justify-center">
+                <Palette size={15} className="text-violet-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-800">Theme</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Choose your preferred color scheme</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              {([
+                {
+                  key: 'light' as ThemeMode,
+                  label: 'Light',
+                  icon: <Sun size={16} />,
+                  preview: (
+                    <div className="w-full h-14 rounded-xl overflow-hidden border border-gray-200 flex">
+                      <div className="w-1/3 bg-white border-r border-gray-100 flex flex-col gap-1 p-1.5">
+                        <div className="w-full h-1.5 bg-gray-200 rounded-full" />
+                        <div className="w-3/4 h-1.5 bg-gray-100 rounded-full" />
+                        <div className="w-2/3 h-1.5 bg-gray-100 rounded-full" />
+                      </div>
+                      <div className="flex-1 bg-gray-50 p-1.5 flex flex-col gap-1">
+                        <div className="w-full h-3 bg-white rounded border border-gray-100" />
+                        <div className="w-2/3 h-3 bg-blue-100 rounded" />
+                      </div>
+                    </div>
+                  ),
+                  accent: 'from-blue-500 to-indigo-600',
+                },
+                {
+                  key: 'dark' as ThemeMode,
+                  label: 'Dark',
+                  icon: <Moon size={16} />,
+                  preview: (
+                    <div className="w-full h-14 rounded-xl overflow-hidden border border-slate-600 flex">
+                      <div className="w-1/3 bg-slate-800 border-r border-slate-700 flex flex-col gap-1 p-1.5">
+                        <div className="w-full h-1.5 bg-slate-600 rounded-full" />
+                        <div className="w-3/4 h-1.5 bg-slate-700 rounded-full" />
+                        <div className="w-2/3 h-1.5 bg-slate-700 rounded-full" />
+                      </div>
+                      <div className="flex-1 bg-slate-900 p-1.5 flex flex-col gap-1">
+                        <div className="w-full h-3 bg-slate-800 rounded border border-slate-700" />
+                        <div className="w-2/3 h-3 bg-blue-900 rounded" />
+                      </div>
+                    </div>
+                  ),
+                  accent: 'from-slate-500 to-slate-700',
+                },
+                {
+                  key: 'midnight' as ThemeMode,
+                  label: 'Midnight',
+                  icon: <Sparkles size={16} />,
+                  preview: (
+                    <div className="w-full h-14 rounded-xl overflow-hidden border border-purple-900 flex">
+                      <div className="w-1/3 bg-[#0d0f2b] border-r border-[#1e2142] flex flex-col gap-1 p-1.5">
+                        <div className="w-full h-1.5 bg-[#252660] rounded-full" />
+                        <div className="w-3/4 h-1.5 bg-[#1e2142] rounded-full" />
+                        <div className="w-2/3 h-1.5 bg-[#1e2142] rounded-full" />
+                      </div>
+                      <div className="flex-1 bg-[#060614] p-1.5 flex flex-col gap-1">
+                        <div className="w-full h-3 bg-[#0d0f2b] rounded border border-[#1e2142]" />
+                        <div className="w-2/3 h-3 rounded" style={{ background: 'rgba(124,58,237,0.3)' }} />
+                      </div>
+                    </div>
+                  ),
+                  accent: 'from-violet-600 to-purple-800',
+                },
+              ] as const).map(({ key, label, icon, preview, accent }) => (
+                <button
+                  key={key}
+                  onClick={() => dispatch(setThemeMode(key))}
+                  className={`rounded-2xl border-2 p-3 flex flex-col gap-2 text-left transition-all duration-200 ${
+                    themeMode === key
+                      ? 'border-blue-500 shadow-md shadow-blue-100'
+                      : 'border-gray-100 hover:border-gray-200 hover:shadow-sm'
+                  }`}
+                >
+                  {preview}
+                  <div className="flex items-center justify-between mt-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-5 h-5 rounded-md bg-gradient-to-br ${accent} flex items-center justify-center text-white`}>
+                        {icon}
+                      </div>
+                      <span className="text-xs font-semibold text-gray-700">{label}</span>
+                    </div>
+                    {themeMode === key && (
+                      <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
+                        <CheckCircle2 size={10} className="text-white" />
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Cursor Style ── */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-fuchsia-50 rounded-xl flex items-center justify-center">
+                <MousePointer2 size={15} className="text-fuchsia-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-800">Cursor Style</h2>
+                <p className="text-xs text-gray-400 mt-0.5">GSAP-powered custom cursor effects</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {([
+                {
+                  key: 'default' as CursorStyle,
+                  label: 'Default',
+                  desc: 'Standard OS cursor',
+                  dot: <div className="w-3 h-3 border-2 border-gray-400 rounded-sm" style={{ borderTopRightRadius: 0 }} />,
+                  bg: 'bg-gray-100',
+                },
+                {
+                  key: 'neon' as CursorStyle,
+                  label: 'Neon',
+                  desc: 'Glowing green cursor',
+                  dot: (
+                    <div className="relative flex items-center justify-center">
+                      <div className="w-2.5 h-2.5 rounded-full bg-[#00ffaa]" style={{ boxShadow: '0 0 8px #00ffaa, 0 0 16px rgba(0,255,170,0.6)' }} />
+                      <div className="absolute w-6 h-6 rounded-full border border-[rgba(0,255,170,0.4)]" />
+                    </div>
+                  ),
+                  bg: 'bg-gray-900',
+                },
+                {
+                  key: 'cosmic' as CursorStyle,
+                  label: 'Cosmic',
+                  desc: 'Purple galaxy cursor',
+                  dot: (
+                    <div className="relative flex items-center justify-center">
+                      <div className="w-3 h-3 rounded-full" style={{ background: 'radial-gradient(circle,#c084fc,#7c3aed)', boxShadow: '0 0 10px #a78bfa' }} />
+                      <div className="absolute w-7 h-7 rounded-full border border-[rgba(167,139,250,0.45)]" />
+                    </div>
+                  ),
+                  bg: 'bg-gray-900',
+                },
+                {
+                  key: 'minimal' as CursorStyle,
+                  label: 'Minimal',
+                  desc: 'Clean subtle dot',
+                  dot: (
+                    <div className="relative flex items-center justify-center">
+                      <div className="w-2 h-2 rounded-full bg-slate-500" />
+                      <div className="absolute w-5 h-5 rounded-full border border-slate-400/50" />
+                    </div>
+                  ),
+                  bg: 'bg-gray-50',
+                },
+              ] as const).map(({ key, label, desc, dot, bg }) => (
+                <button
+                  key={key}
+                  onClick={() => dispatch(setCursorStyle(key))}
+                  className={`rounded-xl border-2 p-4 flex items-center gap-3 text-left transition-all duration-200 ${
+                    cursorStyle === key
+                      ? 'border-fuchsia-400 shadow-md shadow-fuchsia-50'
+                      : 'border-gray-100 hover:border-gray-200 hover:shadow-sm'
+                  }`}
+                >
+                  <div className={`w-12 h-10 ${bg} rounded-xl flex items-center justify-center shrink-0`}>
+                    {dot}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800">{label}</p>
+                    <p className="text-xs text-gray-400 truncate">{desc}</p>
+                  </div>
+                  {cursorStyle === key && (
+                    <div className="w-4 h-4 rounded-full bg-fuchsia-500 flex items-center justify-center shrink-0">
+                      <CheckCircle2 size={10} className="text-white" />
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {cursorStyle !== 'default' && (
+              <div className="flex items-start gap-2 bg-fuchsia-50 border border-fuchsia-100 rounded-xl px-4 py-3">
+                <Sparkles size={14} className="text-fuchsia-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-fuchsia-700">
+                  Custom cursor is <strong>active</strong>. Move your mouse to see the GSAP-animated effect. Click anywhere to see the press animation.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* AI Button Position Card — hidden for employees (they don't have the chatbot) */}
+          {role !== 'employee' && <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-5">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center">
                 <Bot size={15} className="text-indigo-600" />
@@ -386,7 +584,7 @@ export const SettingsPage: React.FC = () => {
                 Reset to default
               </button>
             </div>
-          </div>
+          </div>}
         </div>
       )}
 

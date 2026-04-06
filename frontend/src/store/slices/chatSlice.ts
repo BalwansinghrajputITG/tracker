@@ -40,6 +40,7 @@ interface ChatState {
   contacts: ChatContact[]
   isConnected: boolean
   isLoading: boolean
+  error: string | null
 }
 
 const initialState: ChatState = {
@@ -50,22 +51,32 @@ const initialState: ChatState = {
   contacts: [],
   isConnected: false,
   isLoading: false,
+  error: null,
 }
 
 const chatSlice = createSlice({
   name: 'chat',
   initialState,
   reducers: {
-    fetchRoomsRequest(state) { state.isLoading = true },
+    fetchRoomsRequest(state) { state.isLoading = true; state.error = null },
     fetchRoomsSuccess(state, action: PayloadAction<ChatRoom[]>) {
       state.rooms = action.payload
       state.isLoading = false
+    },
+    fetchRoomsFailure(state, action: PayloadAction<string>) {
+      state.isLoading = false
+      state.error = action.payload
     },
     setActiveRoom(state, action: PayloadAction<string>) {
       state.activeRoomId = action.payload
     },
     fetchMessagesRequest(state, _: PayloadAction<{ roomId: string; before?: string }>) {
       state.isLoading = true
+      state.error = null
+    },
+    fetchMessagesFailure(state, action: PayloadAction<string>) {
+      state.isLoading = false
+      state.error = action.payload
     },
     fetchMessagesSuccess(state, action: PayloadAction<{ roomId: string; messages: ChatMessage[] }>) {
       state.isLoading = false
@@ -85,7 +96,12 @@ const chatSlice = createSlice({
         room.last_message_at = action.payload.sent_at
       }
     },
-    sendMessageRequest(state, _: PayloadAction<{ roomId: string; content: string; mentions?: string[] }>) {},
+    sendMessageRequest(state, _: PayloadAction<{ roomId: string; content: string; mentions?: string[] }>) {
+      state.error = null
+    },
+    sendMessageFailure(state, action: PayloadAction<string>) {
+      state.error = action.payload
+    },
     setTyping(state, action: PayloadAction<{ roomId: string; userId: string; userName: string }>) {
       const { roomId, userId } = action.payload
       if (!state.typingUsers[roomId]) state.typingUsers[roomId] = []
@@ -114,9 +130,12 @@ const chatSlice = createSlice({
 })
 
 export const {
-  fetchRoomsRequest, fetchRoomsSuccess, setActiveRoom,
-  fetchMessagesRequest, fetchMessagesSuccess, receiveMessage,
-  sendMessageRequest, setTyping, clearTyping, setConnected,
+  fetchRoomsRequest, fetchRoomsSuccess, fetchRoomsFailure,
+  setActiveRoom,
+  fetchMessagesRequest, fetchMessagesSuccess, fetchMessagesFailure,
+  receiveMessage,
+  sendMessageRequest, sendMessageFailure,
+  setTyping, clearTyping, setConnected,
   fetchContactsRequest, fetchContactsSuccess, addRoom,
 } = chatSlice.actions
 export default chatSlice.reducer

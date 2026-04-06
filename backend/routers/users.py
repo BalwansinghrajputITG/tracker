@@ -4,6 +4,7 @@ from bson import ObjectId
 from datetime import datetime, timezone
 from typing import Optional
 import hashlib
+import re
 from passlib.context import CryptContext
 
 from database import get_db
@@ -73,6 +74,7 @@ async def list_users(
     department: Optional[str] = None,
     role: Optional[str] = None,
     team_id: Optional[str] = None,
+    search: Optional[str] = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, le=100),
     current_user=Depends(require_user_manager),
@@ -101,6 +103,12 @@ async def list_users(
         query["roles"] = role
     if team_id:
         query["team_ids"] = ObjectId(team_id)
+    if search:
+        query["$or"] = [
+            {"full_name": {"$regex": search, "$options": "i"}},
+            {"email":     {"$regex": search, "$options": "i"}},
+            {"department":{"$regex": search, "$options": "i"}},
+        ]
 
     skip = (page - 1) * limit
     cursor = db.users.find(query, {"password_hash": 0}).skip(skip).limit(limit)
@@ -161,25 +169,32 @@ async def create_user(
 @router.get("/for-project")
 async def list_users_for_project(
     page: int = Query(1, ge=1),
-    limit: int = Query(30, le=100),
+    limit: int = Query(30, le=500),
     search: Optional[str] = None,
     role: Optional[str] = None,
-    current_user=Depends(require_manager),
+    roles: Optional[str] = None,
+    current_user=Depends(require_user_manager),
     db=Depends(get_db),
 ):
     """
-    Return ALL active users (unscoped) for project member assignment.
-    Used by the Create Project page — any manager can see the full company directory.
+    Return ALL active users (unscoped) for project/department member assignment.
+    Accessible by ceo, coo, admin, pm, team_lead.
+    `roles` accepts a comma-separated list, e.g. roles=ceo,coo,pm
     """
     query: dict = {"is_active": True}
     if search:
+        escaped = re.escape(search)
         query["$or"] = [
-            {"full_name": {"$regex": search, "$options": "i"}},
-            {"department": {"$regex": search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}},
+            {"full_name": {"$regex": escaped, "$options": "i"}},
+            {"department": {"$regex": escaped, "$options": "i"}},
+            {"email": {"$regex": escaped, "$options": "i"}},
         ]
     if role:
         query["primary_role"] = role
+    elif roles:
+        role_list = [r.strip() for r in roles.split(",") if r.strip()]
+        if role_list:
+            query["primary_role"] = {"$in": role_list}
 
     skip = (page - 1) * limit
     cursor = db.users.find(query, {"password_hash": 0}).skip(skip).limit(limit).sort("full_name", 1)
@@ -305,14 +320,20 @@ async def get_user_profile(
         {"name": 1, "department": 1, "lead_id": 1, "project_ids": 1},
     ).to_list(50)
 
+    # Batch-fetch team leads in one query
+    lead_ids = [t.get("lead_id") for t in team_docs if t.get("lead_id")]
+    lead_map: dict = {}
+    if lead_ids:
+        async for u in db.users.find({"_id": {"$in": lead_ids}}, {"full_name": 1}):
+            lead_map[u["_id"]] = u["full_name"]
+
     teams = []
     for t in team_docs:
-        lead = await db.users.find_one({"_id": t.get("lead_id")}, {"full_name": 1})
         teams.append({
             "id": str(t["_id"]),
             "name": t["name"],
             "department": t.get("department", ""),
-            "lead": lead["full_name"] if lead else "Unassigned",
+            "lead": lead_map.get(t.get("lead_id"), "Unassigned"),
             "project_count": len(t.get("project_ids", [])),
         })
     base["teams"] = teams
@@ -324,9 +345,15 @@ async def get_user_profile(
          "due_date": 1, "is_delayed": 1, "pm_id": 1, "repo_url": 1, "repo_token": 1},
     ).sort("due_date", 1).to_list(100)
 
+    # Batch-fetch PMs in one query
+    pm_ids = [p.get("pm_id") for p in project_docs if p.get("pm_id")]
+    pm_map: dict = {}
+    if pm_ids:
+        async for u in db.users.find({"_id": {"$in": pm_ids}}, {"full_name": 1}):
+            pm_map[u["_id"]] = u["full_name"]
+
     projects = []
     for p in project_docs:
-        pm = await db.users.find_one({"_id": p.get("pm_id")}, {"full_name": 1})
         projects.append({
             "id": str(p["_id"]),
             "name": p["name"],
@@ -335,7 +362,7 @@ async def get_user_profile(
             "progress": p.get("progress_percentage", 0),
             "due_date": p["due_date"].isoformat() if p.get("due_date") else None,
             "is_delayed": p.get("is_delayed", False),
-            "pm": pm["full_name"] if pm else "Unassigned",
+            "pm": pm_map.get(p.get("pm_id"), "Unassigned"),
             "repo_url": p.get("repo_url", ""),
         })
     base["projects"] = projects
@@ -347,9 +374,15 @@ async def get_user_profile(
          "is_blocked": 1, "project_id": 1, "logged_hours": 1},
     ).sort("due_date", 1).to_list(100)
 
+    # Batch-fetch task projects in one query
+    task_proj_ids = list({t.get("project_id") for t in task_docs if t.get("project_id")})
+    task_proj_map: dict = {}
+    if task_proj_ids:
+        async for p in db.projects.find({"_id": {"$in": task_proj_ids}}, {"name": 1}):
+            task_proj_map[p["_id"]] = p["name"]
+
     tasks = []
     for t in task_docs:
-        proj = await db.projects.find_one({"_id": t.get("project_id")}, {"name": 1})
         tasks.append({
             "id": str(t["_id"]),
             "title": t["title"],
@@ -357,7 +390,7 @@ async def get_user_profile(
             "priority": t.get("priority", "medium"),
             "due_date": t["due_date"].isoformat() if t.get("due_date") else None,
             "is_blocked": t.get("is_blocked", False),
-            "project": proj["name"] if proj else "Unknown",
+            "project": task_proj_map.get(t.get("project_id"), "Unknown"),
             "logged_hours": t.get("logged_hours", 0),
         })
     base["tasks"] = tasks

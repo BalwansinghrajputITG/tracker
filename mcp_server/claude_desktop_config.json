@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "enterprise-pm": {
+      "command": "python",
+      "args": ["C:/Users/Itgeeks/Desktop/project/mcp_server/server.py"],
+      "env": {
+        "PM_API_URL": "https://nuke-tan-calling-chest.trycloudflare.com/api/v1",
+        "PM_API_TOKEN": ""
+      }
+    }
+  }
+}

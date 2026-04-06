@@ -97,7 +97,7 @@ export const TasksPage: React.FC = () => {
   const [statusUpdating, setStatusUpdating]   = useState(false)
   const [taskSaving, setTaskSaving]           = useState(false)
 
-  const isManager = ['ceo', 'coo', 'pm', 'team_lead'].includes(user?.primary_role || '')
+  const isManager = ['ceo', 'coo', 'admin', 'pm', 'team_lead'].includes(user?.primary_role || '')
 
   useEffect(() => {
     const params: any = { page, limit }

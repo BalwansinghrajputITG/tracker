@@ -18,6 +18,19 @@ from utils.team_scope import (
 router = APIRouter()
 
 
+def _serialize(obj):
+    """Recursively convert ObjectId → str and datetime → isoformat in any structure."""
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _serialize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_serialize(i) for i in obj]
+    return obj
+
+
 class TaskCreate(BaseModel):
     project_id: str
     title: str
@@ -101,16 +114,7 @@ async def list_tasks(
     tasks = []
     async for t in cursor:
         t["id"] = str(t.pop("_id"))
-        t["project_id"] = str(t.get("project_id", ""))
-        t["reporter_id"] = str(t["reporter_id"]) if t.get("reporter_id") else None
-        t["assignee_ids"] = [str(a) for a in t.get("assignee_ids", [])]
-        if t.get("due_date"):
-            t["due_date"] = t["due_date"].isoformat()
-        if t.get("created_at"):
-            t["created_at"] = t["created_at"].isoformat()
-        if t.get("updated_at"):
-            t["updated_at"] = t["updated_at"].isoformat()
-        tasks.append(t)
+        tasks.append(_serialize(t))
 
     total = await db.tasks.count_documents(query)
     return {"tasks": tasks, "total": total, "page": page, "limit": limit}
@@ -186,26 +190,21 @@ async def get_task(
     await assert_task_access(db, task, current_user)
 
     task["id"] = str(task.pop("_id"))
-    task["project_id"] = str(task.get("project_id", ""))
-    task["reporter_id"] = str(task["reporter_id"]) if task.get("reporter_id") else None
-    assignee_ids = [str(a) for a in task.get("assignee_ids", [])]
-    task["assignee_ids"] = assignee_ids
+    # Collect assignee ObjectIds before _serialize converts them
+    raw_assignee_ids = task.get("assignee_ids", [])
 
     # Resolve assignee names
     assignees = []
-    if assignee_ids:
+    if raw_assignee_ids:
         async for u in db.users.find(
-            {"_id": {"$in": [ObjectId(a) for a in assignee_ids]}},
+            {"_id": {"$in": raw_assignee_ids}},
             {"full_name": 1, "primary_role": 1, "department": 1},
         ):
             assignees.append({"id": str(u["_id"]), "name": u["full_name"],
                                "role": u.get("primary_role", ""), "department": u.get("department", "")})
     task["assignees"] = assignees
 
-    for f in ("due_date", "created_at", "updated_at"):
-        if task.get(f):
-            task[f] = task[f].isoformat()
-    return task
+    return _serialize(task)
 
 
 class StatusUpdate(BaseModel):
@@ -307,7 +306,7 @@ async def add_comment(
         {"_id": ObjectId(task_id)},
         {"$push": {"comments": comment}},
     )
-    return {"comment": comment}
+    return {"comment": _serialize(comment)}
 
 
 @router.post("/{task_id}/log-hours")
@@ -317,6 +316,9 @@ async def log_hours(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
+    if body.hours <= 0:
+        raise HTTPException(status_code=400, detail="Hours must be a positive number")
+
     task = await db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

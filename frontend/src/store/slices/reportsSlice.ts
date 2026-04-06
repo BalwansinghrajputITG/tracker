@@ -19,6 +19,8 @@ export interface Report {
   user_name?: string
   user_department?: string
   user_role?: string
+  project_name?: string
+  reviewed_by_name?: string
 }
 
 interface ReportsState {

@@ -3,7 +3,7 @@ import { useSelector, useDispatch } from 'react-redux'
 import {
   LayoutDashboard, FolderKanban, ListChecks, FileText,
   Users, UserPlus, MessageSquare, BarChart3, Settings, LogOut,
-  Zap, ChevronRight, Megaphone, FileSpreadsheet,
+  Zap, ChevronRight, Megaphone, BookOpen,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import { logout } from '../../store/slices/authSlice'
@@ -27,8 +27,8 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
   {
     title: 'Work',
     items: [
-      { label: 'Projects',   icon: <FolderKanban size={16} />,    href: '/projects',  roles: ['ceo', 'coo', 'pm', 'team_lead', 'employee'] },
-      { label: 'Tasks',      icon: <ListChecks size={16} />,      href: '/tasks',     roles: ['ceo', 'coo', 'pm', 'team_lead', 'employee'] },
+      { label: 'Projects',   icon: <FolderKanban size={16} />,    href: '/projects',  roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead', 'employee'] },
+      { label: 'Tasks',      icon: <ListChecks size={16} />,      href: '/tasks',     roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
       { label: 'Reports',    icon: <FileText size={16} />,        href: '/reports',   roles: ['ceo', 'coo', 'pm', 'team_lead', 'employee'] },
       { label: 'Messages',   icon: <MessageSquare size={16} />,   href: '/chat',      roles: ['ceo', 'coo', 'pm', 'team_lead', 'employee'] },
     ],
@@ -36,11 +36,15 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
   {
     title: 'Management',
     items: [
-      { label: 'Teams',              icon: <Users size={16} />,      href: '/teams',              roles: ['ceo', 'coo', 'pm', 'team_lead'] },
-      { label: 'Users',              icon: <UserPlus size={16} />,   href: '/users',              roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
-      { label: 'Sheets',              icon: <FileSpreadsheet size={16} />, href: '/sheets',          roles: ['ceo', 'coo', 'pm', 'team_lead'] },
-      { label: 'Analytics',          icon: <BarChart3 size={16} />,  href: '/analytics',          roles: ['ceo', 'coo', 'pm'] },
-      { label: 'Digital Marketing',  icon: <Megaphone size={16} />,  href: '/digital-marketing',  roles: ['ceo', 'coo', 'pm', 'team_lead'] },
+      { label: 'Control Center',      icon: <UserPlus size={16} />,   href: '/users',              roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
+      { label: 'Analytics',          icon: <BarChart3 size={16} />,  href: '/analytics',          roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
+      // { label: 'Digital Marketing',  icon: <Megaphone size={16} />,  href: '/digital-marketing',  roles: ['ceo', 'coo', 'pm', 'team_lead'] },
+    ],
+  },
+  {
+    title: 'Personal',
+    items: [
+      { label: 'My Workspace', icon: <BookOpen size={16} />, href: '/personal' },
     ],
   },
   {
@@ -81,7 +85,7 @@ const ROLE_LABELS: Record<string, string> = {
 export const Sidebar: React.FC<{ currentPath: string }> = ({ currentPath }) => {
   const dispatch = useDispatch()
   const { user } = useSelector((s: RootState) => s.auth)
-  const unreadCount = useSelector((s: RootState) => (s as any).notifications?.unreadCount ?? 0)
+  const unreadCount = useSelector((s: RootState) => (s as RootState).notifications?.chat_unread_count ?? 0)
   const userRoles = new Set(user?.roles || [])
   const role = user?.primary_role || 'employee'
 

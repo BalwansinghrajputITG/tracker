@@ -9,7 +9,8 @@ ENV REACT_APP_API_URL=$REACT_APP_API_URL
 ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
 
 COPY package.json .
-RUN npm install --legacy-peer-deps && npm install ajv@^8 --legacy-peer-deps
+RUN npm install --legacy-peer-deps --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 --fetch-retries=5 && \
+    npm install ajv@^8 --legacy-peer-deps
 COPY . .
 RUN npm run build
 

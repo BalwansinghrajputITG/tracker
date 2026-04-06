@@ -29,7 +29,7 @@ export const Modal: React.FC<ModalProps> = ({ onClose, children }) => {
       onClick={onClose}
     >
       {/* stopPropagation so clicks inside the dialog don't close it */}
-      <div onClick={e => e.stopPropagation()}>
+      <div onClick={e => e.stopPropagation()} className="flex flex-col items-center w-full">
         {children}
       </div>
     </div>,

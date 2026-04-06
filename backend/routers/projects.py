@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import os
 import copy
+import uuid as _uuid_mod
 
 from database import get_db
 from middleware.auth import get_current_user
@@ -318,27 +319,34 @@ async def get_project_detail(
     ).to_list(20)
     base["teams"] = [{"id": str(t["_id"]), "name": t["name"], "department": t.get("department", "")} for t in team_docs]
 
-    # Tasks
+    # Tasks — fetch all tasks then batch-resolve assignees in a single query
     task_docs = await db.tasks.find(
         {"project_id": project["_id"]},
         {"title": 1, "status": 1, "priority": 1, "due_date": 1, "assignee_ids": 1, "is_blocked": 1, "description": 1},
     ).sort("due_date", 1).to_list(100)
 
-    tasks_out = []
-    for t in task_docs:
-        assignee_docs = await db.users.find(
-            {"_id": {"$in": t.get("assignee_ids", [])}},
-            {"full_name": 1},
-        ).to_list(10)
-        tasks_out.append({
+    # Collect all unique assignee IDs across all tasks, fetch them once
+    all_assignee_ids = list({oid for t in task_docs for oid in t.get("assignee_ids", [])})
+    assignee_map: dict = {}
+    if all_assignee_ids:
+        async for u in db.users.find({"_id": {"$in": all_assignee_ids}}, {"full_name": 1}):
+            assignee_map[u["_id"]] = u["full_name"]
+
+    tasks_out = [
+        {
             "id": str(t["_id"]),
             "title": t["title"],
             "status": t.get("status", "todo"),
             "priority": t.get("priority", "medium"),
             "due_date": t["due_date"].isoformat() if t.get("due_date") else None,
             "is_blocked": t.get("is_blocked", False),
-            "assignees": [{"id": str(a["_id"]), "name": a["full_name"]} for a in assignee_docs],
-        })
+            "assignees": [
+                {"id": str(oid), "name": assignee_map.get(oid, "Unknown")}
+                for oid in t.get("assignee_ids", [])
+            ],
+        }
+        for t in task_docs
+    ]
     base["tasks"] = tasks_out
     base["figma_url"] = project.get("figma_url", "")
     base["links"] = project.get("links", [])
@@ -455,6 +463,31 @@ async def add_project_member(
         {"$addToSet": {"member_ids": user_oid}, "$set": {"updated_at": datetime.now(timezone.utc)}},
     )
     return {"message": "Member added to project"}
+
+
+@router.delete("/{project_id}/members/{user_id}")
+async def remove_project_member(
+    project_id: str,
+    user_id: str,
+    current_user=Depends(require_manager),
+    db=Depends(get_db),
+):
+    project = await db.projects.find_one({"_id": ObjectId(project_id)})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    await assert_project_access(db, project, current_user)
+
+    # Prevent removing the PM
+    if str(project.get("pm_id", "")) == user_id:
+        raise HTTPException(status_code=400, detail="Cannot remove the project manager from the project.")
+
+    user_oid = ObjectId(user_id)
+    await db.projects.update_one(
+        {"_id": ObjectId(project_id)},
+        {"$pull": {"member_ids": user_oid}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"message": "Member removed from project"}
 
 
 # ─── Git commits helpers ──────────────────────────────────────────────────────
@@ -747,3 +780,115 @@ async def bulk_toggle_stages(
         }},
     )
     return {"message": "Bulk toggle done", "completed": body.completed, "progress_percentage": new_progress}
+
+
+# ─── Tracking Docs (PM-managed Sheets / Docs for performance tracking) ────────
+
+class TrackingDocAdd(BaseModel):
+    url: str
+    title: str = ""
+    api_key: str = ""   # Google Drive API key (stored per-doc, never returned in lists)
+
+
+@router.post("/{project_id}/tracking-docs")
+async def add_tracking_doc(
+    project_id: str,
+    body: TrackingDocAdd,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """PM (or exec) adds a Google Sheets / Docs link to track for this project."""
+    from utils.gdrive import extract_file_id, detect_doc_type
+    _manager_check(current_user)
+
+    project = await db.projects.find_one({"_id": ObjectId(project_id)}, {"pm_id": 1, "tracking_docs": 1})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await assert_project_access(db, project, current_user)
+
+    file_id = extract_file_id(body.url)
+    if not file_id:
+        raise HTTPException(status_code=400, detail="Could not parse a Google Drive file ID from that URL")
+
+    doc = {
+        "id":        str(_uuid_mod.uuid4())[:12],
+        "url":       body.url.strip(),
+        "title":     body.title.strip() or body.url.strip(),
+        "doc_type":  detect_doc_type(body.url),
+        "file_id":   file_id,
+        "api_key":   body.api_key.strip(),
+        "added_by":  str(current_user["_id"]),
+        "added_at":  datetime.now(timezone.utc).isoformat(),
+    }
+    await db.projects.update_one(
+        {"_id": ObjectId(project_id)},
+        {"$push": {"tracking_docs": doc}},
+    )
+    safe = {k: v for k, v in doc.items() if k != "api_key"}
+    safe["has_api_key"] = bool(doc["api_key"])
+    return safe
+
+
+@router.get("/{project_id}/tracking-docs")
+async def list_tracking_docs(
+    project_id: str,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Return tracking docs without exposing API keys."""
+    _manager_check(current_user)
+    project = await db.projects.find_one({"_id": ObjectId(project_id)}, {"tracking_docs": 1})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    docs = project.get("tracking_docs") or []
+    safe = [{k: v for k, v in d.items() if k != "api_key"} | {"has_api_key": bool(d.get("api_key"))} for d in docs]
+    return {"tracking_docs": safe}
+
+
+@router.delete("/{project_id}/tracking-docs/{doc_id}")
+async def delete_tracking_doc(
+    project_id: str,
+    doc_id: str,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    _manager_check(current_user)
+    project = await db.projects.find_one({"_id": ObjectId(project_id)}, {"pm_id": 1})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await assert_project_access(db, project, current_user)
+    await db.projects.update_one(
+        {"_id": ObjectId(project_id)},
+        {"$pull": {"tracking_docs": {"id": doc_id}}},
+    )
+    return {"message": "Tracking doc removed"}
+
+
+@router.get("/{project_id}/tracking-docs/live")
+async def live_tracking_docs(
+    project_id: str,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Fetch live edit stats for all tracking docs in this project via Drive API."""
+    from utils.gdrive import fetch_gdrive_stats
+    _manager_check(current_user)
+    project = await db.projects.find_one({"_id": ObjectId(project_id)}, {"tracking_docs": 1})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    docs = project.get("tracking_docs") or []
+    results = []
+    for d in docs:
+        file_id = d.get("file_id", "")
+        api_key = d.get("api_key", "")
+        stats = await fetch_gdrive_stats(file_id, api_key) if file_id else {"error": "No file ID"}
+        results.append({
+            "id":           d["id"],
+            "title":        d.get("title", ""),
+            "url":          d.get("url", ""),
+            "doc_type":     d.get("doc_type", "other"),
+            "has_api_key":  bool(api_key),
+            "stats":        stats,
+        })
+    return {"docs": results}

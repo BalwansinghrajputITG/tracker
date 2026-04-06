@@ -45,6 +45,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: str
     roles: list[str]
+    primary_role: str
     full_name: str
 
 
@@ -81,6 +82,7 @@ async def login(body: LoginRequest, response: Response, db=Depends(get_db)):
         access_token=access_token,
         user_id=str(user["_id"]),
         roles=user.get("roles", []),
+        primary_role=user.get("primary_role", user.get("roles", ["employee"])[0]),
         full_name=user["full_name"],
     )
 

@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     # CORS
     ALLOWED_ORIGINS: list = []
 
-    # Rate limiting
-    RATE_LIMIT_PER_MINUTE: int = 100
+    # Rate limiting (requests allowed per second per IP)
+    RATE_LIMIT_PER_SECOND: int = 500
 
     @model_validator(mode="after")
     def validate_secret_key(self):
