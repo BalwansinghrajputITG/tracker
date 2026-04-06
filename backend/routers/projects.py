@@ -626,8 +626,7 @@ async def toggle_stage(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    """Toggle a phase stage's completion. Recalculates project progress automatically."""
-    _manager_check(current_user)
+    """Toggle a phase stage's completion. Any project member can toggle stages."""
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -751,8 +750,7 @@ async def bulk_toggle_stages(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    """Mark all stages in a phase as complete or incomplete."""
-    _manager_check(current_user)
+    """Mark all stages in a phase as complete or incomplete. Any project member can bulk-toggle."""
     if body.phase not in VALID_PHASES:
         raise HTTPException(status_code=400, detail=f"Invalid phase '{body.phase}'")
 

@@ -25,7 +25,7 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _ALLOWED_ROLES: dict[str, list[str]] = {
     "ceo":       ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
     "coo":       ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
-    "admin":     ["pm", "team_lead", "employee"],
+    "admin":     ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
     "pm":        ["team_lead", "employee"],
     "team_lead": ["employee"],
 }
@@ -62,6 +62,11 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     department: Optional[str] = None
     notification_preferences: Optional[dict] = None
+    # Admin / exec-only fields
+    email: Optional[str] = None
+    roles: Optional[list[str]] = None
+    primary_role: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 @router.get("/me")
@@ -230,6 +235,8 @@ async def get_subordinates(
             {"_id": {"$in": pm_mids}, "is_active": True},
             {"password_hash": 0},
         ).limit(500)
+    elif is_admin(current_user):
+        cursor = db.users.find({"is_active": True}, {"password_hash": 0}).limit(500)
     elif is_team_lead(current_user):
         # Only members of the team lead's own teams
         allowed_ids = await get_team_member_ids(db, current_user)
@@ -518,11 +525,41 @@ async def update_user(
     db=Depends(get_db),
 ):
     is_self = str(current_user["_id"]) == user_id
-    is_manager = current_user.get("primary_role", "employee") in ("ceo", "coo", "pm", "team_lead")
+    caller_role = current_user.get("primary_role", "employee")
+    is_privileged = caller_role in ("ceo", "coo", "admin") or is_admin(current_user)
+    is_manager = is_privileged or caller_role in ("pm", "team_lead")
+
     if not is_self and not is_manager:
         raise HTTPException(status_code=403, detail="Cannot update other users.")
 
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Only admin / exec can touch privileged fields
+    privileged_fields = {"email", "roles", "primary_role", "is_active"}
+    updates = {}
+    for k, v in body.model_dump().items():
+        if v is None:
+            continue
+        if k in privileged_fields and not is_privileged:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your role cannot change '{k}'.",
+            )
+        updates[k] = v
+
+    if not updates:
+        return {"message": "Nothing to update"}
+
+    # Keep primary_role consistent when roles list is changed
+    if "roles" in updates and "primary_role" not in updates:
+        updates["primary_role"] = updates["roles"][0]
+
+    # Email uniqueness check
+    if "email" in updates:
+        conflict = await db.users.find_one(
+            {"email": updates["email"], "_id": {"$ne": ObjectId(user_id)}}
+        )
+        if conflict:
+            raise HTTPException(status_code=400, detail="Email already in use.")
+
     updates["updated_at"] = datetime.now(timezone.utc)
 
     result = await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
@@ -534,7 +571,7 @@ async def update_user(
 _DELETABLE_ROLES: dict[str, set] = {
     "ceo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
     "coo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "admin":     {"pm", "team_lead", "employee"},
+    "admin":     {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
     "pm":        {"team_lead", "employee"},
     "team_lead": {"employee"},
 }

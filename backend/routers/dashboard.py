@@ -19,8 +19,22 @@ async def ceo_dashboard(
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_ago = today - timedelta(days=7)
 
-    # Delayed projects
-    delayed = await db.projects.count_documents({"is_delayed": True, "status": "active"})
+    # Auto-sync: mark any active project past its due_date as is_delayed=True
+    await db.projects.update_many(
+        {"due_date": {"$lt": now}, "status": "active", "is_delayed": {"$ne": True}},
+        {"$set": {"is_delayed": True}},
+    )
+
+    # Delayed / at-risk count: overdue by date OR manually flagged
+    at_risk_cutoff = now + timedelta(days=7)
+    delayed_filter = {
+        "$or": [
+            {"due_date": {"$lt": now}},   # already past deadline
+            {"is_delayed": True},         # manually flagged via API
+        ],
+        "status": "active",
+    }
+    delayed = await db.projects.count_documents(delayed_filter)
     total_projects = await db.projects.count_documents({"status": "active"})
 
     # Today's report compliance
@@ -76,21 +90,32 @@ async def ceo_dashboard(
             "report_count": t["report_count"],
         })
 
-    # Recent delayed projects list
+    # At-risk & delayed list: overdue OR due within 7 days OR manually flagged
+    at_risk_list_filter = {
+        "$or": [
+            {"due_date": {"$lte": at_risk_cutoff}},  # overdue or due soon
+            {"is_delayed": True},                     # manually flagged
+        ],
+        "status": "active",
+    }
     delayed_projects_cursor = db.projects.find(
-        {"is_delayed": True, "status": "active"},
-        {"name": 1, "delay_reason": 1, "due_date": 1, "pm_id": 1, "progress_percentage": 1, "priority": 1}
+        at_risk_list_filter,
+        {"name": 1, "delay_reason": 1, "due_date": 1, "pm_id": 1,
+         "progress_percentage": 1, "priority": 1, "is_delayed": 1}
     ).sort("due_date", 1).limit(10)
     delayed_list = []
     async for p in delayed_projects_cursor:
         p["id"] = str(p.pop("_id"))
-        p["pm_id"] = str(p.get("pm_id", ""))
+        p["pm_id"] = str(p["pm_id"]) if p.get("pm_id") else ""
         due = p.get("due_date")
         if due:
+            # Motor returns timezone-naive datetimes; normalise before subtraction
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
             p["due_date"] = due.isoformat()
-            days_overdue = (now - due).days
-            p["days_overdue"] = days_overdue
+            p["days_overdue"] = (now - due).days  # negative = still in future (at risk)
         else:
+            p["due_date"] = None
             p["days_overdue"] = 0
         delayed_list.append(p)
 

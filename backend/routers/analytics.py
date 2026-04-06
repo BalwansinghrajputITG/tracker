@@ -51,7 +51,11 @@ async def company_analytics(
     # ── project health ──────────────────────────────────────
     total_projects    = await db.projects.count_documents(proj_filter)
     active_projects   = await db.projects.count_documents({**proj_filter, "status": "active"})
-    delayed_projects  = await db.projects.count_documents({**proj_filter, "is_delayed": True})
+    delayed_projects  = await db.projects.count_documents({
+        **proj_filter,
+        "$or": [{"due_date": {"$lt": now}}, {"is_delayed": True}],
+        "status": "active",
+    })
     completed_projects = await db.projects.count_documents({**proj_filter, "status": "completed"})
     on_hold_projects  = await db.projects.count_documents({**proj_filter, "status": "on_hold"})
     completion_rate   = round(completed_projects / total_projects * 100) if total_projects else 0

@@ -777,11 +777,12 @@ const STAGE_SUGGESTIONS: Record<string, string[]> = {
 interface PhaseTrackerProps {
   project: any
   canManage: boolean
+  canToggleStage: boolean
   projectId: string
   onUpdate: () => void
 }
 
-const PhaseTracker: React.FC<PhaseTrackerProps> = ({ project, canManage, projectId, onUpdate }) => {
+const PhaseTracker: React.FC<PhaseTrackerProps> = ({ project, canManage, canToggleStage, projectId, onUpdate }) => {
   const [selectedPhase, setSelectedPhase] = useState<string>(project.status || 'planning')
   const [toggling, setToggling]           = useState<string | null>(null)
   const [deletingId, setDeletingId]       = useState<string | null>(null)
@@ -826,7 +827,7 @@ const PhaseTracker: React.FC<PhaseTrackerProps> = ({ project, canManage, project
   const overallPct     = allTotal > 0 ? Math.round((allDone / allTotal) * 100) : (project.progress_percentage || 0)
 
   const handleToggle = async (stageId: string, current: boolean) => {
-    if (!canManage || toggling) return
+    if (!canToggleStage || toggling) return
     setToggling(stageId)
     setActionError('')
     try {
@@ -998,7 +999,7 @@ const PhaseTracker: React.FC<PhaseTrackerProps> = ({ project, canManage, project
             {totalCount > 0 && (
               <span className="text-sm font-bold text-gray-700">{progressPct}%</span>
             )}
-            {canManage && totalCount > 0 && !addingStage && (
+            {canToggleStage && totalCount > 0 && !addingStage && (
               <>
                 <button
                   onClick={() => handleBulkToggle(true)}
@@ -1133,11 +1134,11 @@ const PhaseTracker: React.FC<PhaseTrackerProps> = ({ project, canManage, project
               >
                 {/* Checkbox */}
                 <button
-                  disabled={!canManage || !!toggling}
+                  disabled={!canToggleStage || !!toggling}
                   onClick={() => handleToggle(stage.id, stage.completed)}
                   className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
                     stage.completed ? `${meta.dot} border-transparent` : 'border-gray-300 hover:border-blue-400 bg-white'
-                  } ${canManage ? 'cursor-pointer' : 'cursor-default'}`}
+                  } ${canToggleStage ? 'cursor-pointer' : 'cursor-default'}`}
                 >
                   {toggling === stage.id
                     ? <Loader2 size={10} className="animate-spin text-white" />
@@ -1770,6 +1771,10 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
     return false
   })()
 
+  // Any project member (including employees) can check off phase stages
+  const _userId = (user as any)?.user_id || (user as any)?.id
+  const canToggleStage = canManage || (project?.members || []).some((m: any) => m.id === _userId)
+
   if (loading) return (
     <div className="max-w-5xl mx-auto space-y-4">
       <div className="h-10 skeleton rounded-xl w-48" />
@@ -2123,6 +2128,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({ projectId 
             <PhaseTracker
               project={project}
               canManage={canManage}
+              canToggleStage={canToggleStage}
               projectId={projectId}
               onUpdate={loadProject}
             />

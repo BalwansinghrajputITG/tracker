@@ -738,7 +738,14 @@ export const UsersPage: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.map((u, i) => (
-              <UserCard key={u.id} user={u} index={i} onClick={() => navigate(`/users/${u.id}`)} />
+              <UserCard
+                key={u.id}
+                user={u}
+                index={i}
+                onClick={() => navigate(`/users/${u.id}`)}
+                canManage={isAdminOrAbove || ['pm', 'team_lead'].includes(callerRole)}
+                onEdit={() => setSelectedUser(u)}
+              />
             ))}
           </div>
         )}
@@ -2220,7 +2227,7 @@ const ProjectsView: React.FC<{ projects: any[]; usersMap: Record<string, any>; l
 
 // ─── User card ────────────────────────────────────────────────────────────────
 
-const UserCard: React.FC<{ user: User; index: number; onClick: () => void }> = ({ user, index, onClick }) => {
+const UserCard: React.FC<{ user: User; index: number; onClick: () => void; canManage?: boolean; onEdit?: () => void }> = ({ user, index, onClick, canManage, onEdit }) => {
   const role = user.primary_role || 'employee'
   return (
     <div
@@ -2258,7 +2265,18 @@ const UserCard: React.FC<{ user: User; index: number; onClick: () => void }> = (
             )}
           </div>
         </div>
-        <ChevronRight size={14} className="text-gray-300 group-hover:text-blue-400 transition-colors shrink-0 mt-1" />
+        <div className="flex items-center gap-1 shrink-0 mt-1">
+          {canManage && onEdit && (
+            <button
+              onClick={e => { e.stopPropagation(); onEdit() }}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+              title="Edit user"
+            >
+              <Pencil size={13} />
+            </button>
+          )}
+          <ChevronRight size={14} className="text-gray-300 group-hover:text-blue-400 transition-colors" />
+        </div>
       </div>
     </div>
   )
@@ -2277,19 +2295,34 @@ const UserDetailModal: React.FC<{
   const role = user.primary_role || 'employee'
 
   const [mode, setMode] = useState<'view' | 'edit' | 'assign' | 'confirm-delete'>('view')
-  const [editForm, setEditForm] = useState({ full_name: user.full_name, department: user.department || '', phone: user.phone || '' })
+  const [editForm, setEditForm] = useState({ full_name: user.full_name, department: user.department || '', phone: user.phone || '', email: user.email || '', roles: (user.roles || [user.primary_role || 'employee']).join(', '), primary_role: user.primary_role || 'employee' })
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [assigning, setAssigning] = useState(false)
 
-  const canManage = ['ceo', 'coo', 'pm', 'team_lead'].includes(callerRole)
+  const canManage = ['ceo', 'coo', 'admin', 'pm', 'team_lead'].includes(callerRole)
+
+  const isPrivileged = ['ceo', 'coo', 'admin'].includes(callerRole)
 
   const handleEdit = async () => {
     setSaving(true)
     setActionError('')
     try {
-      await api.put(`/users/${user.id}`, editForm)
+      const payload: any = {
+        full_name: editForm.full_name,
+        department: editForm.department,
+        phone: editForm.phone,
+      }
+      if (isPrivileged) {
+        if (editForm.email) payload.email = editForm.email
+        if (editForm.roles) {
+          const rolesArr = editForm.roles.split(',').map(r => r.trim()).filter(Boolean)
+          payload.roles = rolesArr
+          payload.primary_role = editForm.primary_role || rolesArr[0]
+        }
+      }
+      await api.put(`/users/${user.id}`, payload)
       onUpdated()
     } catch (err: any) {
       setActionError(err?.response?.data?.detail || 'Failed to update user')
@@ -2443,6 +2476,32 @@ const UserDetailModal: React.FC<{
                   />
                 </div>
               ))}
+              {isPrivileged && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={editForm.email}
+                      onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                      placeholder="Email address"
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Primary Role</label>
+                    <select
+                      value={editForm.primary_role}
+                      onChange={e => setEditForm({ ...editForm, primary_role: e.target.value })}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
+                    >
+                      {['employee', 'team_lead', 'pm', 'admin', 'coo', 'ceo'].map(r => (
+                        <option key={r} value={r}>{r.replace('_', ' ')}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
               <div className="flex gap-2 pt-1">
                 <button onClick={() => { setMode('view'); setActionError('') }} className="flex-1 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium border border-gray-200 rounded-xl">Cancel</button>
                 <button
