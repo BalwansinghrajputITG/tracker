@@ -103,3 +103,66 @@ async def chat_completion(
     except Exception as e:
         logger.error(f"Unexpected Bedrock error: {e}")
         raise
+
+
+# ── Streaming ────────────────────────────────────────────────────────────────
+
+import queue
+import threading
+
+
+def _sync_stream_chat(
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+    q: queue.Queue,
+) -> None:
+    """Synchronous converse_stream — runs in a thread; puts tokens in queue.
+    Puts None as sentinel when done, or an Exception on error."""
+    try:
+        client = _make_client()
+        system_list, conversation = _convert_messages(messages)
+        kwargs: dict = {
+            "modelId": settings.BEDROCK_MODEL_ID,
+            "messages": conversation,
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
+        }
+        if system_list:
+            kwargs["system"] = system_list
+
+        response = client.converse_stream(**kwargs)
+        for event in response["stream"]:
+            if "contentBlockDelta" in event:
+                delta = event["contentBlockDelta"].get("delta", {})
+                text = delta.get("text", "")
+                if text:
+                    q.put(text)
+        q.put(None)  # sentinel — stream finished
+    except Exception as exc:
+        q.put(exc)
+
+
+async def stream_chat_completion(
+    messages: list[dict],
+    temperature: float = 0.3,
+    max_tokens: int = 1024,
+):
+    """Async generator that yields text tokens from Bedrock converse_stream."""
+    q: queue.Queue = queue.Queue()
+    loop = asyncio.get_event_loop()
+    t = threading.Thread(
+        target=_sync_stream_chat,
+        args=(messages, temperature, max_tokens, q),
+        daemon=True,
+    )
+    t.start()
+    try:
+        while True:
+            chunk = await loop.run_in_executor(None, q.get)
+            if chunk is None:
+                break
+            if isinstance(chunk, Exception):
+                raise chunk
+            yield chunk
+    finally:
+        t.join(timeout=5)

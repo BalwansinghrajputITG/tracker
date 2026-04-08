@@ -7,7 +7,8 @@ import os
 import copy
 import uuid as _uuid_mod
 
-from database import get_db
+from database import get_db, get_redis
+from utils.cache import invalidate_on_project_write
 from middleware.auth import get_current_user
 from middleware.rbac import require_pm_or_above, require_ceo_coo, require_manager
 from services.notification_service import notify_users
@@ -197,6 +198,7 @@ async def create_project(
     body: ProjectCreate,
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     # team_lead: auto-attach their own teams and restrict member selection to their team
     if is_team_lead(current_user) and not is_exec(current_user) and not is_pm(current_user):
@@ -250,6 +252,7 @@ async def create_project(
             reference_type="project",
         )
 
+    await invalidate_on_project_write(redis)
     return {"project_id": project_id, "message": "Project created"}
 
 
@@ -360,6 +363,7 @@ async def update_project(
     body: ProjectUpdate,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
@@ -410,6 +414,7 @@ async def update_project(
             )
 
     await db.projects.update_one({"_id": ObjectId(project_id)}, {"$set": updates})
+    await invalidate_on_project_write(redis)
     return {"message": "Project updated"}
 
 
@@ -418,6 +423,7 @@ async def delete_project(
     project_id: str,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
@@ -435,6 +441,7 @@ async def delete_project(
         {"_id": ObjectId(project_id)},
         {"$set": {"status": "cancelled", "updated_at": datetime.now(timezone.utc)}},
     )
+    await invalidate_on_project_write(redis)
     return {"message": "Project cancelled"}
 
 
@@ -444,6 +451,7 @@ async def add_project_member(
     user_id: str,
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
@@ -462,6 +470,7 @@ async def add_project_member(
         {"_id": ObjectId(project_id)},
         {"$addToSet": {"member_ids": user_oid}, "$set": {"updated_at": datetime.now(timezone.utc)}},
     )
+    await invalidate_on_project_write(redis)
     return {"message": "Member added to project"}
 
 
@@ -471,6 +480,7 @@ async def remove_project_member(
     user_id: str,
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     project = await db.projects.find_one({"_id": ObjectId(project_id)})
     if not project:
@@ -487,6 +497,7 @@ async def remove_project_member(
         {"_id": ObjectId(project_id)},
         {"$pull": {"member_ids": user_oid}, "$set": {"updated_at": datetime.now(timezone.utc)}},
     )
+    await invalidate_on_project_write(redis)
     return {"message": "Member removed from project"}
 
 

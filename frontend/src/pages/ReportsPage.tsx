@@ -14,6 +14,8 @@ import {
 
 import { fetchProjectsRequest } from '../store/slices/projectsSlice'
 import { api } from '../utils/api'
+import { ANALYTICS_ROLES } from '../constants/roles'
+import { useToast } from '../components/shared'
 
 const MOOD_OPTIONS = [
   { value: 'great',    label: 'Great',    icon: <ThumbsUp size={14} />,    color: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' },
@@ -36,6 +38,7 @@ const emptyForm = {
 
 export const ReportsPage: React.FC = () => {
   const dispatch = useDispatch()
+  const toast = useToast()
   const { items, missing, total, isLoading, submitLoading, submitSuccess, submitError, error } = useSelector((s: RootState) => s.reports)
   const { items: projects } = useSelector((s: RootState) => s.projects)
   const { user } = useSelector((s: RootState) => s.auth)
@@ -56,7 +59,7 @@ export const ReportsPage: React.FC = () => {
   const [editLoading, setEditLoading] = useState(false)
   const [editError, setEditError] = useState('')
 
-  const isManager = ['ceo', 'coo', 'pm', 'team_lead'].includes(user?.primary_role || '')
+  const isManager = ANALYTICS_ROLES.includes(user?.primary_role as any)
 
   useEffect(() => {
     dispatch(fetchReportsRequest({ page, limit }))
@@ -134,10 +137,12 @@ export const ReportsPage: React.FC = () => {
           blockers: editForm.blockers.split('\n').filter(Boolean).map((t: string) => t.trim()),
         },
       })
+      toast.success('Report updated')
       setEditMode(false)
       setSelectedReport(null)
       dispatch(fetchReportsRequest({ page, limit }))
     } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to update report')
       setEditError(err?.response?.data?.detail || 'Failed to update report')
     } finally {
       setEditLoading(false)
@@ -669,11 +674,13 @@ export const ReportsPage: React.FC = () => {
                         setReportDeleteError('')
                         try {
                           await api.delete(`/reports/${selectedReport.id}`)
+                          toast.success('Report deleted')
                           setSelectedReport(null)
                           setReportConfirmDelete(false)
                           setPage(1)
                           dispatch(fetchReportsRequest({ page: 1, limit }))
                         } catch (err: any) {
+                          toast.error(err?.response?.data?.detail || 'Failed to delete report')
                           setReportDeleteError(err?.response?.data?.detail || 'Failed to delete report')
                           setReportDeleteLoading(false)
                         }

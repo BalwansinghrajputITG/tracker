@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 
-from database import get_db
+from database import get_db, get_redis
 from middleware.auth import get_current_user
 from middleware.rbac import require_manager
 from utils.team_scope import (
@@ -10,8 +10,56 @@ from utils.team_scope import (
     get_pm_project_ids, get_pm_member_ids,
     get_team_project_ids, get_team_member_ids,
 )
+from utils.cache import analytics_key, cache_get, cache_set, TTL_COMPANY, TTL_PROJECTS, TTL_PROJECT, TTL_AI, TTL_EMPLOYEES
 
 router = APIRouter()
+
+
+# ─── Scoring configuration ────────────────────────────────────────────────────
+# Productivity / company health score weights (must sum to 1.0)
+_W_COMPLIANCE   = 0.35   # weight: daily report compliance rate
+_W_ON_TIME      = 0.35   # weight: projects delivered on time (inverse of delay rate)
+_W_TASK_DONE    = 0.30   # weight: overall task completion rate
+
+# Project performance score weights
+# 40 pts: task completion rate  |  30 pts: progress percentage
+# 20 pts: on-time bonus         |  10 pts: no blocked tasks
+_W_PROJ_TASKS    = 0.40   # task completion rate contribution
+_W_PROJ_PROGRESS = 0.30   # reported progress percentage contribution
+_PROJ_ON_TIME_BONUS   = 20  # bonus points for not being delayed
+_PROJ_BLOCKED_MAX     = 10  # max points for zero blocked tasks
+_PROJ_BLOCKED_PER_TASK = 2  # points deducted per blocked task
+
+# Project list tier thresholds (rank-based for top; score-based for low)
+_PROJ_TOP_RANK      = 5    # top-N projects by performance score are "top" tier
+_PROJ_LOW_SCORE     = 40   # score below this (or delayed) → "low" tier
+
+# Employee performance score — max points per dimension (must sum to 100)
+_EMP_MAX_HOURS       = 25   # hours worked dimension cap
+_EMP_MAX_TASKS       = 20   # task completion dimension cap
+_EMP_MAX_COMPLIANCE  = 15   # report compliance dimension cap
+_EMP_MAX_COMMITS     = 20   # code commits dimension cap
+_EMP_MAX_DOCS        = 20   # document edits dimension cap
+
+# Employee performance normalizers (baseline value = 100% of dimension cap)
+_NORM_HOURS_PER_DAY    = 8.0   # expected working hours per day
+_NORM_COMMITS_PER_DAY  = 2.0   # baseline commits/day for full commit score
+_NORM_DOCS_PER_DAY     = 5.0   # baseline doc edits/day for full docs score
+
+# Fallback proxy scores when live data is unavailable
+_EMP_REPOS_FALLBACK_PTS  = 6   # points per GitHub repo (fallback if no commit data)
+_EMP_DOCS_FALLBACK_PTS   = 5   # points per tracked doc (fallback if no edit data)
+
+# Employee performance tier thresholds (score out of 100)
+_EMP_TIER_EXCELLENT  = 80   # score >= this → "Excellent" / green
+_EMP_TIER_ON_TRACK   = 60   # score >= this → "On Track"  / blue
+_EMP_TIER_ATTENTION  = 40   # score >= this → "Needs Attention" / amber
+                             # score <  this → "At Risk"   / red
+
+# Workdays ratio used to estimate expected working days in a period
+_WORKDAYS_PER_WEEK   = 5
+_DAYS_PER_WEEK       = 7
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 # ─────────────────────────────────────────────────────────────
@@ -22,7 +70,12 @@ async def company_analytics(
     days: int = Query(30, le=90),
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
+    ckey = analytics_key("company", str(current_user["_id"]), days=days)
+    if hit := await cache_get(redis, ckey):
+        return hit
+
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
@@ -102,12 +155,12 @@ async def company_analytics(
     reports_today   = await db.daily_reports.count_documents({"report_date": {"$gte": today}, **report_member_filter})
     compliance_rate = round(reports_today / total_employees * 100) if total_employees else 0
     productivity_score = round(
-        compliance_rate * 0.35 +
-        (100 - min(delay_rate, 100)) * 0.35 +
-        task_rate * 0.30
+        compliance_rate * _W_COMPLIANCE +
+        (100 - min(delay_rate, 100)) * _W_ON_TIME +
+        task_rate * _W_TASK_DONE
     )
 
-    return {
+    result = {
         "project_health": {
             "total": total_projects,
             "active": active_projects,
@@ -127,6 +180,8 @@ async def company_analytics(
         "productivity_score": productivity_score,
         "by_department": by_department,
     }
+    await cache_set(redis, ckey, result, TTL_COMPANY)
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -137,7 +192,12 @@ async def projects_analytics(
     days: int = Query(30, le=90),
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
+    ckey = analytics_key("projects", str(current_user["_id"]), days=days)
+    if hit := await cache_get(redis, ckey):
+        return hit
+
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
@@ -209,16 +269,13 @@ async def projects_analytics(
             due = due.replace(tzinfo=timezone.utc)
         days_overdue = max(0, (now - due).days) if due and due < now else 0
 
-        # Performance score 0–100
-        #   40 pts: task completion rate
-        #   30 pts: progress percentage
-        #   20 pts: on-time (not delayed)
-        #   10 pts: no blocked tasks
+        # Performance score 0–100 (see _W_PROJ_* constants for weights)
         perf_score = max(0, min(100, round(
-            task_rate  * 0.40 +
-            progress   * 0.30 +
-            (0 if is_delayed else 20) +
-            (10 if blocked_tasks == 0 else max(0, 10 - blocked_tasks * 2))
+            task_rate  * _W_PROJ_TASKS +
+            progress   * _W_PROJ_PROGRESS +
+            (0 if is_delayed else _PROJ_ON_TIME_BONUS) +
+            (_PROJ_BLOCKED_MAX if blocked_tasks == 0
+             else max(0, _PROJ_BLOCKED_MAX - blocked_tasks * _PROJ_BLOCKED_PER_TASK))
         )))
 
         result.append({
@@ -248,14 +305,16 @@ async def projects_analytics(
     for i, r in enumerate(result):
         rank = i + 1
         r["rank"] = rank
-        if rank <= 5:
+        if rank <= _PROJ_TOP_RANK:
             r["performance_tier"] = "top"
-        elif r["performance_score"] < 40 or r["is_delayed"]:
+        elif r["performance_score"] < _PROJ_LOW_SCORE or r["is_delayed"]:
             r["performance_tier"] = "low"
         else:
             r["performance_tier"] = "normal"
 
-    return {"projects": result, "period_days": days}
+    payload = {"projects": result, "period_days": days}
+    await cache_set(redis, ckey, payload, TTL_PROJECTS)
+    return payload
 
 
 # ─────────────────────────────────────────────────────────────
@@ -267,11 +326,16 @@ async def project_analytics(
     days: int = Query(30, le=90),
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     from utils.repo import fetch_commits as _fetch_commits, fetch_contributor_stats as _fetch_contributor_stats
     from utils.token_encrypt import decrypt_token as _decrypt_token
 
     pid = ObjectId(project_id)
+    ckey = analytics_key("project", str(current_user["_id"]), project_id=project_id, days=days)
+    if hit := await cache_get(redis, ckey):
+        return hit
+
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
@@ -375,7 +439,7 @@ async def project_analytics(
             "pct": round((done / total) * 100) if total else 0,
         })
 
-    return {
+    result = {
         "task_distribution": {
             (t["_id"] or "unknown"): {"count": t["count"], "hours": round(t.get("total_hours") or 0, 1)}
             for t in task_stats
@@ -389,6 +453,8 @@ async def project_analytics(
         "project_member_ids": [str(i) for i in (project_doc or {}).get("member_ids", [])],
         "phase_breakdown": phase_breakdown,
     }
+    await cache_set(redis, ckey, result, TTL_PROJECT)
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -400,10 +466,15 @@ async def project_ai_suggestions(
     days: int = Query(30, le=90),
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     from chatbot.llm_client import chat_completion
 
     pid = ObjectId(project_id)
+    ckey = analytics_key("ai", str(current_user["_id"]), project_id=project_id, days=days)
+    if hit := await cache_get(redis, ckey):
+        return hit
+
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
@@ -491,7 +562,9 @@ No markdown, no explanation, just the JSON array."""
     except Exception as e:
         suggestions = [f"Unable to generate AI suggestions: {e}"]
 
-    return {"suggestions": suggestions, "context": context, "generated_at": now.isoformat()}
+    result = {"suggestions": suggestions, "context": context, "generated_at": now.isoformat()}
+    await cache_set(redis, ckey, result, TTL_AI)
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -502,34 +575,35 @@ def _perf_mode(avg_hours: float, task_rate: int, report_compliance: float,
                commits_per_day: float = 0.0, github_repos: int = 0,
                docs_edits_per_day: float = 0.0, tracking_docs: int = 0) -> dict:
     """
-    Score 0-100 from five signals:
-      25 pts — daily work hours        (avg vs 8h expected)
-      20 pts — task completion rate
-      15 pts — report compliance        (reports / expected working days)
-      20 pts — GitHub commits           (commits_per_day; 2+ commits/day = full score)
-               OR github_repos*6        (fallback when no actual commits)
-      20 pts — Docs/Sheets activity     (docs_edits_per_day; OR tracking_docs*5 fallback)
+    Score 0-100 from five signals (see _EMP_MAX_* and _NORM_* constants for weights):
+      _EMP_MAX_HOURS      pts — daily work hours     (avg vs _NORM_HOURS_PER_DAY expected)
+      _EMP_MAX_TASKS      pts — task completion rate
+      _EMP_MAX_COMPLIANCE pts — report compliance    (reports / expected working days)
+      _EMP_MAX_COMMITS    pts — GitHub commits       (commits_per_day vs _NORM_COMMITS_PER_DAY)
+                               OR github_repos * _EMP_REPOS_FALLBACK_PTS (fallback)
+      _EMP_MAX_DOCS       pts — Docs/Sheets activity (docs_edits_per_day vs _NORM_DOCS_PER_DAY)
+                               OR tracking_docs * _EMP_DOCS_FALLBACK_PTS (fallback)
     """
-    hours_score      = min(25, round((avg_hours / 8.0) * 25)) if avg_hours else 0
-    task_score       = min(20, round(task_rate * 0.20))
-    compliance_score = min(15, round(report_compliance * 15))
+    hours_score      = min(_EMP_MAX_HOURS,       round((avg_hours / _NORM_HOURS_PER_DAY) * _EMP_MAX_HOURS)) if avg_hours else 0
+    task_score       = min(_EMP_MAX_TASKS,        round(task_rate * (_EMP_MAX_TASKS / 100)))
+    compliance_score = min(_EMP_MAX_COMPLIANCE,   round(report_compliance * _EMP_MAX_COMPLIANCE))
 
     if commits_per_day > 0:
-        commit_score = min(20, round((commits_per_day / 2.0) * 20))
+        commit_score = min(_EMP_MAX_COMMITS, round((commits_per_day / _NORM_COMMITS_PER_DAY) * _EMP_MAX_COMMITS))
     else:
-        commit_score = min(20, github_repos * 6)
+        commit_score = min(_EMP_MAX_COMMITS, github_repos * _EMP_REPOS_FALLBACK_PTS)
 
     if docs_edits_per_day > 0:
-        docs_score = min(20, round((docs_edits_per_day / 5.0) * 20))
+        docs_score = min(_EMP_MAX_DOCS, round((docs_edits_per_day / _NORM_DOCS_PER_DAY) * _EMP_MAX_DOCS))
     else:
-        docs_score = min(20, tracking_docs * 5)
+        docs_score = min(_EMP_MAX_DOCS, tracking_docs * _EMP_DOCS_FALLBACK_PTS)
 
     score = hours_score + task_score + compliance_score + commit_score + docs_score
-    if score >= 80:
+    if score >= _EMP_TIER_EXCELLENT:
         label, color = "Excellent",       "green"
-    elif score >= 60:
+    elif score >= _EMP_TIER_ON_TRACK:
         label, color = "On Track",        "blue"
-    elif score >= 40:
+    elif score >= _EMP_TIER_ATTENTION:
         label, color = "Needs Attention", "amber"
     else:
         label, color = "At Risk",         "red"
@@ -554,12 +628,17 @@ async def employees_analytics(
     days: int = Query(30, le=90),
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
+    ckey = analytics_key("employees", str(current_user["_id"]), days=days)
+    if hit := await cache_get(redis, ckey):
+        return hit
+
     now    = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
     today  = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    # expected working days ≈ days * 5/7
-    expected_days = max(1, round(days * 5 / 7))
+    # expected working days ≈ days * _WORKDAYS_PER_WEEK / _DAYS_PER_WEEK
+    expected_days = max(1, round(days * _WORKDAYS_PER_WEEK / _DAYS_PER_WEEK))
 
     emp_scope: dict = {"is_active": True, "primary_role": {"$in": ["employee", "team_lead", "pm"]}}
     if is_pm(current_user) and not is_exec(current_user):
@@ -701,7 +780,9 @@ async def employees_analytics(
         else:
             emp["performance_tier"] = "normal"
 
-    return {"employees": result, "period_days": days}
+    payload = {"employees": result, "period_days": days}
+    await cache_set(redis, ckey, payload, TTL_EMPLOYEES)
+    return payload
 
 
 # ─────────────────────────────────────────────────────────────

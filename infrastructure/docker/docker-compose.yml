@@ -57,8 +57,8 @@ services:
       context: ../../frontend
       dockerfile: Dockerfile
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-https://theoretical-extend-secrets-automatic.trycloudflare.com/api/v1}
-        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:8004/ws}
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-https://housemaidy-fredericka-spongingly.ngrok-free.dev/api/v1}
+        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-wss://housemaidy-fredericka-spongingly.ngrok-free.dev/ws}
     container_name: enterprise_frontend
     restart: unless-stopped
     ports:

@@ -37,7 +37,6 @@ class RegisterRequest(BaseModel):
     password: str
     full_name: str
     department: str
-    roles: list[str] = ["employee"]
 
 
 class TokenResponse(BaseModel):
@@ -98,8 +97,8 @@ async def register(body: RegisterRequest, db=Depends(get_db)):
         "password_hash": hash_password(body.password),
         "full_name": body.full_name,
         "department": body.department,
-        "roles": body.roles,
-        "primary_role": body.roles[0] if body.roles else "employee",
+        "roles": ["employee"],
+        "primary_role": "employee",
         "team_ids": [],
         "project_ids": [],
         "manager_id": None,

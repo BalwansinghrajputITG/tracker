@@ -25,3 +25,28 @@ async def chat_completion(
     except Exception as e:
         logger.error(f"Groq API error: {e}")
         raise
+
+
+async def stream_chat_completion(
+    messages: list[dict],
+    model: str = None,
+    temperature: float = 0.3,
+    max_tokens: int = 1024,
+):
+    """Async generator that yields text tokens from Groq streaming API."""
+    model = model or settings.GROQ_MODEL
+    try:
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        async for chunk in stream:
+            token = chunk.choices[0].delta.content
+            if token:
+                yield token
+    except Exception as e:
+        logger.error(f"Groq stream error: {e}")
+        raise

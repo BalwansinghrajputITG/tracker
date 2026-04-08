@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = "noreply@company.com"
 
-    # CORS
-    ALLOWED_ORIGINS: list = []
+    # CORS — set via env var as JSON array: '["https://yourapp.vercel.app"]'
+    ALLOWED_ORIGINS: list = ["http://localhost:3000"]
 
     # Rate limiting (requests allowed per second per IP)
     RATE_LIMIT_PER_SECOND: int = 500

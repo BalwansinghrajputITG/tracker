@@ -4,10 +4,11 @@ from bson import ObjectId
 from datetime import datetime, timezone
 from typing import Optional
 
-from database import get_db
+from database import get_db, get_redis
 from middleware.auth import get_current_user
 from middleware.rbac import require_manager
 from services.notification_service import notify_users
+from utils.cache import invalidate_on_task_write
 from utils.team_scope import (
     is_exec, is_pm, is_team_lead,
     get_team_project_ids,
@@ -125,6 +126,7 @@ async def create_task(
     body: TaskCreate,
     current_user=Depends(require_manager),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     # Scope check: PM and team_lead can only create tasks in their own projects
     if is_pm(current_user) and not is_exec(current_user):
@@ -175,6 +177,7 @@ async def create_task(
             reference_type="task",
         )
 
+    await invalidate_on_task_write(redis)
     return {"task_id": task_id}
 
 
@@ -220,6 +223,7 @@ async def update_task_status(
     body: StatusUpdate,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     """Any assignee (including employees) can update task status."""
     if body.status not in VALID_STATUSES:
@@ -235,6 +239,7 @@ async def update_task_status(
         {"_id": ObjectId(task_id)},
         {"$set": {"status": body.status, "updated_at": datetime.now(timezone.utc)}},
     )
+    await invalidate_on_task_write(redis)
     return {"message": "Status updated", "status": body.status}
 
 
@@ -244,6 +249,7 @@ async def update_task(
     body: TaskUpdate,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     task = await db.tasks.find_one({"_id": ObjectId(task_id)})
     if not task:
@@ -279,6 +285,7 @@ async def update_task(
 
     updates["updated_at"] = datetime.now(timezone.utc)
     await db.tasks.update_one({"_id": ObjectId(task_id)}, {"$set": updates})
+    await invalidate_on_task_write(redis)
     return {"message": "Task updated"}
 
 

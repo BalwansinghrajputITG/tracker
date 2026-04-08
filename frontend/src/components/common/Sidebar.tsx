@@ -3,42 +3,44 @@ import { useSelector, useDispatch } from 'react-redux'
 import {
   LayoutDashboard, FolderKanban, ListChecks, FileText,
   Users, UserPlus, MessageSquare, BarChart3, Settings, LogOut,
-  Zap, ChevronRight, Megaphone, BookOpen,
+  Zap, ChevronRight, BookOpen, Link2,
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { RootState } from '../../store'
 import { logout } from '../../store/slices/authSlice'
-import { navigate } from '../../pages/AppLayout'
+import {
+  ROLE_LABELS, ROLE_AVATAR_GRADIENT, ROLE_BADGE_SIMPLE, NAV_ROLES,
+} from '../../constants/roles'
 
 interface NavItem {
   label: string
   icon: React.ReactNode
   href: string
   roles?: string[]
-  badge?: (state: any) => number | undefined
 }
 
 const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
   {
     title: 'Overview',
     items: [
-      { label: 'Dashboard',  icon: <LayoutDashboard size={16} />, href: '/' },
+      { label: 'Dashboard', icon: <LayoutDashboard size={16} />, href: '/' },
     ],
   },
   {
     title: 'Work',
     items: [
-      { label: 'Projects',   icon: <FolderKanban size={16} />,    href: '/projects',  roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead', 'employee'] },
-      { label: 'Tasks',      icon: <ListChecks size={16} />,      href: '/tasks',     roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
-      { label: 'Reports',    icon: <FileText size={16} />,        href: '/reports',   roles: ['ceo', 'coo', 'pm', 'team_lead', 'employee'] },
-      { label: 'Messages',   icon: <MessageSquare size={16} />,   href: '/chat',      roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead', 'employee'] },
+      { label: 'Projects', icon: <FolderKanban size={16} />,  href: '/projects',  roles: NAV_ROLES['/projects']  },
+      { label: 'Tasks',    icon: <ListChecks size={16} />,    href: '/tasks',     roles: NAV_ROLES['/tasks']     },
+      { label: 'Reports',  icon: <FileText size={16} />,      href: '/reports',   roles: NAV_ROLES['/reports']   },
+      { label: 'Messages', icon: <MessageSquare size={16} />, href: '/chat',      roles: NAV_ROLES['/chat']      },
+      { label: 'Basecamp', icon: <Link2 size={16} />,         href: '/basecamp',  roles: NAV_ROLES['/basecamp']  },
     ],
   },
   {
     title: 'Management',
     items: [
-      { label: 'Control Center',      icon: <UserPlus size={16} />,   href: '/users',              roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
-      { label: 'Analytics',          icon: <BarChart3 size={16} />,  href: '/analytics',          roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
-      // { label: 'Digital Marketing',  icon: <Megaphone size={16} />,  href: '/digital-marketing',  roles: ['ceo', 'coo', 'pm', 'team_lead'] },
+      { label: 'Control Center', icon: <UserPlus size={16} />,  href: '/users',     roles: NAV_ROLES['/users']     },
+      { label: 'Analytics',      icon: <BarChart3 size={16} />, href: '/analytics', roles: NAV_ROLES['/analytics'] },
     ],
   },
   {
@@ -55,35 +57,9 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
   },
 ]
 
-const ROLE_COLORS: Record<string, string> = {
-  ceo:       'from-purple-500 to-violet-600',
-  coo:       'from-indigo-500 to-blue-600',
-  admin:     'from-rose-500 to-red-600',
-  pm:        'from-blue-500 to-cyan-600',
-  team_lead: 'from-teal-500 to-emerald-600',
-  employee:  'from-slate-400 to-gray-500',
-}
-
-const ROLE_BADGE: Record<string, string> = {
-  ceo:       'bg-purple-100 text-purple-700',
-  coo:       'bg-indigo-100 text-indigo-700',
-  admin:     'bg-rose-100 text-rose-700',
-  pm:        'bg-blue-100 text-blue-700',
-  team_lead: 'bg-teal-100 text-teal-700',
-  employee:  'bg-gray-100 text-gray-600',
-}
-
-const ROLE_LABELS: Record<string, string> = {
-  ceo:       'CEO',
-  coo:       'COO',
-  admin:     'Administrator',
-  pm:        'Project Manager',
-  team_lead: 'Team Lead',
-  employee:  'Employee',
-}
-
 export const Sidebar: React.FC<{ currentPath: string }> = ({ currentPath }) => {
   const dispatch = useDispatch()
+  const navigate = useNavigate()
   const { user } = useSelector((s: RootState) => s.auth)
   const unreadCount = useSelector((s: RootState) => (s as RootState).notifications?.chat_unread_count ?? 0)
   const userRoles = new Set(user?.roles || [])
@@ -114,13 +90,13 @@ export const Sidebar: React.FC<{ currentPath: string }> = ({ currentPath }) => {
           onClick={() => navigate('/settings')}
         >
           <div className="flex items-center gap-2.5">
-            <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${ROLE_COLORS[role]} flex items-center justify-center text-white text-sm font-bold shadow-sm shrink-0`}>
+            <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${ROLE_AVATAR_GRADIENT[role as keyof typeof ROLE_AVATAR_GRADIENT] || ROLE_AVATAR_GRADIENT.employee} flex items-center justify-center text-white text-sm font-bold shadow-sm shrink-0`}>
               {user?.full_name?.[0]?.toUpperCase() || 'U'}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-gray-800 truncate leading-tight">{user?.full_name}</p>
-              <span className={`text-xs px-1.5 py-0.5 rounded-md font-semibold ${ROLE_BADGE[role]}`}>
-                {ROLE_LABELS[role] || role}
+              <span className={`text-xs px-1.5 py-0.5 rounded-md font-semibold ${ROLE_BADGE_SIMPLE[role as keyof typeof ROLE_BADGE_SIMPLE] || ROLE_BADGE_SIMPLE.employee}`}>
+                {ROLE_LABELS[role as keyof typeof ROLE_LABELS] || role}
               </span>
             </div>
             <ChevronRight size={13} className="text-gray-300 shrink-0" />
@@ -148,7 +124,7 @@ export const Sidebar: React.FC<{ currentPath: string }> = ({ currentPath }) => {
                     <button
                       key={item.href}
                       onClick={() => navigate(item.href)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group relative`}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group relative"
                       style={{
                         background: isActive ? 'linear-gradient(135deg, #eff6ff, #eef2ff)' : undefined,
                         color: isActive ? '#2563eb' : '#64748b',
@@ -184,7 +160,6 @@ export const Sidebar: React.FC<{ currentPath: string }> = ({ currentPath }) => {
 
       {/* Footer */}
       <div className="p-3 border-t border-slate-100">
-        {/* Version tag */}
         <div className="px-3 mb-2">
           <p className="text-xs text-gray-300 font-medium">v2.0 · Enterprise Edition</p>
         </div>

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from bson import ObjectId
 from datetime import datetime, timezone
@@ -8,7 +9,7 @@ import re
 
 from database import get_db
 from middleware.auth import get_current_user
-from chatbot.llm_client import chat_completion
+from chatbot.llm_client import chat_completion, stream_completion
 from chatbot.system_prompt import build_system_prompt
 from chatbot.command_parser import parse_command, extract_intent_from_natural_language, ParsedCommand
 from chatbot.intent_classifier import classify_intent
@@ -250,6 +251,215 @@ async def chatbot_message(
         "action_taken": command.command in ACTION_COMMANDS if command else False,
         "structured_data": structured_data,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Streaming endpoint — returns SSE tokens as they arrive from the LLM
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/stream")
+async def chatbot_stream(
+    body: ChatMessage,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Identical pre-processing to /message but streams LLM tokens via SSE.
+
+    SSE event format:
+      data: {"token": "..."}\n\n          — incremental text token
+      data: {"done": true, ...metadata}\n\n — final event with session_id etc.
+      data: {"error": "..."}\n\n          — only on failure
+    """
+    user_message = body.message.strip()
+    session_id = body.session_id or str(uuid.uuid4())
+    role = current_user.get("primary_role", "manager")
+
+    session = await db.chatbot_sessions.find_one({
+        "user_id": current_user["_id"],
+        "session_id": session_id,
+    })
+    history = session["messages"] if session else []
+    session_context = session.get("context", {}) if session else {}
+
+    # ── Command Parsing (same logic as /message) ──────────────────────────────
+    command = parse_command(user_message)
+
+    if not command:
+        classified = await classify_intent(user_message)
+        if classified:
+            command = parse_command(classified)
+
+    if not command:
+        keyword_intent = extract_intent_from_natural_language(user_message)
+        if keyword_intent:
+            command = parse_command(keyword_intent)
+
+    if command and not command.args:
+        active_name = session_context.get("active_project") or session_context.get("active_team")
+        if active_name and command.command in ("project", "edit-project", "cancel-project",
+                                               "update-progress", "commits", "contributor-stats",
+                                               "team", "edit-team", "delete-team"):
+            command = ParsedCommand(command=command.command, args=[active_name], raw=command.raw)
+
+    # ── Context Building ──────────────────────────────────────────────────────
+    context_str = ""
+    context_builder = ContextBuilder(db)
+
+    if not command:
+        context_str = await context_builder.build_context_for_command(
+            "_general", [], current_user
+        )
+
+    if command:
+        if command.command in ACTION_COMMANDS:
+            executor = ActionExecutor(db, current_user)
+            raw_arg = command.args[0] if command.args else ""
+            result = await _route_action(executor, command.command, raw_arg, command.args)
+            context_str = f"ACTION RESULT:\n{json.dumps(result, indent=2, default=str)}"
+
+        elif command.command == "message":
+            # DM command — not streamable, handle inline
+            if len(command.args) >= 2:
+                target_name = command.args[0]
+                msg_text = command.args[1]
+                target_user = await db.users.find_one(
+                    {"full_name": {"$regex": target_name, "$options": "i"}}
+                )
+                if target_user:
+                    room = await db.chat_rooms.find_one({
+                        "type": "direct",
+                        "participants": {"$all": [current_user["_id"], target_user["_id"]]},
+                    })
+                    if not room:
+                        room_result = await db.chat_rooms.insert_one({
+                            "type": "direct",
+                            "participants": [current_user["_id"], target_user["_id"]],
+                            "created_by": current_user["_id"],
+                            "last_message_at": datetime.now(timezone.utc),
+                            "last_message_preview": msg_text[:100],
+                            "is_active": True,
+                            "created_at": datetime.now(timezone.utc),
+                        })
+                        room_id = str(room_result.inserted_id)
+                    else:
+                        room_id = str(room["_id"])
+                    await db.chat_messages.insert_one({
+                        "room_id": ObjectId(room_id),
+                        "sender_id": current_user["_id"],
+                        "content": msg_text,
+                        "message_type": "text",
+                        "is_deleted": False,
+                        "read_by": [current_user["_id"]],
+                        "sent_at": datetime.now(timezone.utc),
+                    })
+                    reply = f"Message sent to {target_user['full_name']}: \"{msg_text}\""
+                    async def _dm_stream():
+                        yield f"data: {json.dumps({'token': reply})}\n\n"
+                        yield f"data: {json.dumps({'done': True, 'session_id': session_id, 'command': 'message', 'action_taken': True, 'structured_data': None})}\n\n"
+                    return StreamingResponse(_dm_stream(), media_type="text/event-stream",
+                                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        elif command.command == "reports":
+            report_index = ReportIndex(db)
+            index = await report_index.build_index(days=14)
+            context_str = await report_index.query_index(index, user_message)
+            context_str = f"RELEVANT REPORT DATA (via PageIndex):\n{context_str}"
+
+        else:
+            context_str = await context_builder.build_context_for_command(
+                command.command, command.args, current_user
+            )
+
+    # ── Build LLM messages ────────────────────────────────────────────────────
+    user_name = current_user.get("full_name", "User")
+    system_prompt = build_system_prompt(role, user_name)
+
+    if session_context:
+        ctx_lines = []
+        if session_context.get("active_project"):
+            ctx_lines.append(f"Active project in conversation: {session_context['active_project']}")
+        if session_context.get("active_team"):
+            ctx_lines.append(f"Active team in conversation: {session_context['active_team']}")
+        if session_context.get("active_employee"):
+            ctx_lines.append(f"Active employee in conversation: {session_context['active_employee']}")
+        if ctx_lines:
+            system_prompt += "\n\n[SESSION CONTEXT]\n" + "\n".join(ctx_lines)
+
+    llm_messages = [{"role": "system", "content": system_prompt}]
+    for h in history[-10:]:
+        llm_messages.append({"role": h["role"], "content": h["content"]})
+
+    user_content = user_message
+    if context_str:
+        user_content = f"{user_message}\n\n[CONTEXT DATA]\n{context_str}"
+    llm_messages.append({"role": "user", "content": user_content})
+
+    # ── Capture command state for use inside generator ────────────────────────
+    _command_name = command.command if command else None
+    _action_taken = _command_name in ACTION_COMMANDS if _command_name else False
+
+    async def event_generator():
+        full_response = ""
+        try:
+            async for token in stream_completion(llm_messages, temperature=0.3, max_tokens=1024):
+                full_response += token
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            return
+
+        # ── Post-stream: update session context ──────────────────────────────
+        _sess_ctx = dict(session_context)
+        if command and command.args:
+            if _command_name in ("project", "edit-project", "cancel-project",
+                                 "update-progress", "commits", "contributor-stats"):
+                _sess_ctx["active_project"] = command.args[0]
+                _sess_ctx.pop("active_team", None)
+            elif _command_name in ("team", "edit-team", "delete-team"):
+                _sess_ctx["active_team"] = command.args[0]
+                _sess_ctx.pop("active_project", None)
+            elif _command_name == "employee":
+                _sess_ctx["active_employee"] = command.args[0]
+
+        new_history = history + [
+            {"role": "user", "content": user_message,
+             "timestamp": datetime.now(timezone.utc).isoformat(),
+             "command": _command_name},
+            {"role": "assistant", "content": full_response,
+             "timestamp": datetime.now(timezone.utc).isoformat()},
+        ]
+        await db.chatbot_sessions.update_one(
+            {"user_id": current_user["_id"], "session_id": session_id},
+            {"$set": {
+                "messages": new_history[-50:],
+                "context": _sess_ctx,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+
+        # ── Structured data (non-blocking best-effort) ────────────────────────
+        structured_data = None
+        if command and _command_name not in ACTION_COMMANDS and _command_name != "message":
+            try:
+                structured_data = await context_builder.get_structured_data(
+                    _command_name, command.args, current_user
+                )
+            except Exception:
+                pass
+
+        yield f"data: {json.dumps({'done': True, 'session_id': session_id, 'command': _command_name, 'action_taken': _action_taken, 'structured_data': structured_data})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # prevent nginx from buffering
+            "Connection": "keep-alive",
+        },
+    )
 
 
 async def _route_action(executor: ActionExecutor, cmd: str, raw_arg: str, all_args: list) -> dict:

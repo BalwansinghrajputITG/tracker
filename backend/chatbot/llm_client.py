@@ -46,3 +46,33 @@ async def chat_completion(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+
+
+async def stream_completion(
+    messages: list[dict],
+    model: str = None,
+    temperature: float = 0.3,
+    max_tokens: int = 1024,
+):
+    """Async generator — yields text tokens. Tries Bedrock first, falls back to Groq."""
+    if _bedrock_configured():
+        try:
+            logger.info("LLM stream: using Amazon Nova Pro (Bedrock)")
+            async for token in bedrock_client.stream_chat_completion(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ):
+                yield token
+            return
+        except Exception as e:
+            logger.warning(f"Bedrock stream failed ({e}), falling back to Groq")
+
+    logger.info("LLM stream: using Groq (fallback)")
+    async for token in groq_client.stream_chat_completion(
+        messages=messages,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    ):
+        yield token

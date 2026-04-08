@@ -4,10 +4,11 @@ from bson import ObjectId
 from datetime import datetime, timezone, date, timedelta
 from typing import Optional
 
-from database import get_db
+from database import get_db, get_redis
 from middleware.auth import get_current_user
 from middleware.rbac import require_manager
 from services.notification_service import notify_users
+from utils.cache import invalidate_on_report_write
 from utils.team_scope import (
     is_exec, is_pm, is_team_lead,
     get_team_member_ids,
@@ -68,6 +69,7 @@ async def submit_report(
     body: ReportCreate,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     # Check for duplicate submission
     report_date = datetime.combine(body.report_date, datetime.min.time()).replace(tzinfo=timezone.utc)
@@ -104,6 +106,7 @@ async def submit_report(
     }
 
     result = await db.daily_reports.insert_one(doc)
+    await invalidate_on_report_write(redis)
     return {"report_id": str(result.inserted_id), "message": "Report submitted"}
 
 
@@ -286,6 +289,7 @@ async def edit_report(
     body: ReportUpdate,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     """Owner can edit their own report (only mood, notes, structured_data)."""
     report = await db.daily_reports.find_one({"_id": ObjectId(report_id)})
@@ -306,6 +310,7 @@ async def edit_report(
         raise HTTPException(status_code=400, detail="No fields to update")
 
     await db.daily_reports.update_one({"_id": ObjectId(report_id)}, {"$set": updates})
+    await invalidate_on_report_write(redis)
     return {"message": "Report updated"}
 
 
@@ -340,6 +345,7 @@ async def delete_report(
     report_id: str,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
+    redis=Depends(get_redis),
 ):
     report = await db.daily_reports.find_one({"_id": ObjectId(report_id)})
     if not report:
@@ -350,4 +356,5 @@ async def delete_report(
         await assert_report_access(db, report, current_user)
 
     await db.daily_reports.delete_one({"_id": ObjectId(report_id)})
+    await invalidate_on_report_write(redis)
     return {"message": "Report deleted"}

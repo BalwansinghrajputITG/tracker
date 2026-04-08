@@ -16,6 +16,7 @@ import {
   selectMonitorSession, clearMonitorSelection, MonitorUser,
 } from '../../store/slices/chatbotSlice'
 import { EntityCards } from './ChatbotEntityCards'
+import { EXEC_ROLES } from '../../constants/roles'
 
 /* ─── Quick commands ────────────────────────────────────────────── */
 
@@ -569,7 +570,7 @@ const MonitorPanel: React.FC = () => {
 
 export const Chatbot: React.FC = () => {
   const dispatch = useDispatch()
-  const { messages, isLoading, isOpen, monitorTab } = useSelector((s: RootState) => s.chatbot)
+  const { messages, isLoading, isStreaming, isOpen, monitorTab } = useSelector((s: RootState) => s.chatbot)
   const { user } = useSelector((s: RootState) => s.auth)
 
   const [input, setInput]               = useState('')
@@ -624,7 +625,7 @@ export const Chatbot: React.FC = () => {
   const paletteRef     = useRef<HTMLDivElement>(null)
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
 
-  const isExec     = ['ceo', 'coo'].includes(user?.primary_role || '')
+  const isExec     = EXEC_ROLES.includes(user?.primary_role as any)
   const callerRole = user?.primary_role || ''
   const userName   = user?.full_name || ''
 
@@ -640,12 +641,13 @@ export const Chatbot: React.FC = () => {
   }, [messages])
 
   useEffect(() => {
-    if (isLoading) {
+    // Only show fetching indicator during the pre-stream phase (isLoading but not yet streaming)
+    if (isLoading && !isStreaming) {
       const last = messages[messages.length - 1]
       if (last?.role === 'user' && isDataCommand(last.content)) { setFetchingData(true); return }
     }
     setFetchingData(false)
-  }, [isLoading, messages])
+  }, [isLoading, isStreaming, messages])
 
   useEffect(() => {
     if (!slashOpen || !paletteRef.current) return
@@ -854,7 +856,7 @@ export const Chatbot: React.FC = () => {
                 {messages.map((msg: BotMessage) => (
                   <MessageBubble key={msg.id} msg={msg} isOwn isFullscreen={isFullscreen} callerRole={callerRole} />
                 ))}
-                {isLoading && <TypingIndicator fetching={fetchingData} />}
+                {isLoading && !isStreaming && <TypingIndicator fetching={fetchingData} />}
               </>
             )}
             <div ref={messagesEndRef} />
@@ -893,7 +895,7 @@ export const Chatbot: React.FC = () => {
                 disabled={!input.trim() || isLoading}
                 className="w-9 h-9 bg-gradient-to-br from-indigo-600 to-violet-700 text-white rounded-xl flex items-center justify-center disabled:opacity-30 hover:scale-105 active:scale-95 transition-all shadow-md shadow-indigo-200 shrink-0 mb-0.5"
               >
-                {isLoading ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={15} />}
+                {(isLoading && !isStreaming) ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={15} />}
               </button>
             </div>
 

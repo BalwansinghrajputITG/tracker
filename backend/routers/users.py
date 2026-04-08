@@ -21,7 +21,8 @@ from utils.token_encrypt import decrypt_token
 router = APIRouter()
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Roles each creator level is allowed to assign
+# Roles each creator level is allowed to assign.
+# MUST stay in sync with frontend/src/constants/roles.ts → ASSIGNABLE_ROLES
 _ALLOWED_ROLES: dict[str, list[str]] = {
     "ceo":       ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
     "coo":       ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
@@ -568,6 +569,7 @@ async def update_user(
     return {"message": "User updated"}
 
 
+# MUST stay in sync with frontend/src/constants/roles.ts → ASSIGNABLE_ROLES
 _DELETABLE_ROLES: dict[str, set] = {
     "ceo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
     "coo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},

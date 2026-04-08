@@ -39,6 +39,8 @@ interface ChatbotState {
   sessionId: string
   messages: BotMessage[]
   isLoading: boolean
+  isStreaming: boolean           // true once tokens start arriving
+  streamingMessageId: string | null
   isOpen: boolean
   error: string | null
 
@@ -58,6 +60,8 @@ const initialState: ChatbotState = {
   sessionId: uuidv4(),
   messages: [],
   isLoading: false,
+  isStreaming: false,
+  streamingMessageId: null,
   isOpen: false,
   error: null,
 
@@ -105,8 +109,52 @@ const chatbotSlice = createSlice({
         structured_data: action.payload.structured_data ?? null,
       })
     },
+
+    // ── Streaming actions ──────────────────────────────────────────────────
+    /** Called when the stream connection opens — inserts empty placeholder */
+    streamStart(state) {
+      const id = uuidv4()
+      state.isStreaming = true
+      state.streamingMessageId = id
+      state.messages.push({
+        id,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+      })
+    },
+    /** Append one token to the in-progress message */
+    streamToken(state, action: PayloadAction<string>) {
+      const msg = state.messages.find(m => m.id === state.streamingMessageId)
+      if (msg) msg.content += action.payload
+    },
+    /** Stream finished — attach metadata to the placeholder message */
+    streamEnd(state, action: PayloadAction<{ command?: string; action_taken?: boolean; structured_data?: any }>) {
+      state.isLoading = false
+      state.isStreaming = false
+      const msg = state.messages.find(m => m.id === state.streamingMessageId)
+      if (msg) {
+        msg.command = action.payload.command
+        msg.action_taken = action.payload.action_taken
+        msg.structured_data = action.payload.structured_data ?? null
+      }
+      state.streamingMessageId = null
+    },
+    /** Stream error — replace placeholder content with error text */
+    streamError(state, action: PayloadAction<string>) {
+      state.isLoading = false
+      state.isStreaming = false
+      state.error = action.payload
+      const msg = state.messages.find(m => m.id === state.streamingMessageId)
+      if (msg) {
+        msg.content = 'Sorry, I encountered an error. Please try again.'
+      }
+      state.streamingMessageId = null
+    },
+
     setError(state, action: PayloadAction<string>) {
       state.isLoading = false
+      state.isStreaming = false
       state.error = action.payload
       state.messages.push({
         id: uuidv4(),
@@ -124,6 +172,8 @@ const chatbotSlice = createSlice({
       state.messages = []
       state.sessionId = uuidv4()
       state.isLoading = false
+      state.isStreaming = false
+      state.streamingMessageId = null
       state.error = null
       state.isOpen = false
       state.monitorTab = 'own'
@@ -191,7 +241,9 @@ const chatbotSlice = createSlice({
 })
 
 export const {
-  toggleChatbot, openChatbot, sendMessageRequest, receiveResponse, setError, clearHistory, resetSession,
+  toggleChatbot, openChatbot, sendMessageRequest, receiveResponse,
+  streamStart, streamToken, streamEnd, streamError,
+  setError, clearHistory, resetSession,
   setMonitorTab, fetchMonitorUsersRequest, fetchMonitorUsersSuccess, fetchMonitorUsersFailure,
   selectMonitorUser, fetchMonitorSessionsSuccess, fetchMonitorSessionsFailure,
   selectMonitorSession, fetchMonitorMessagesSuccess, fetchMonitorMessagesFailure,

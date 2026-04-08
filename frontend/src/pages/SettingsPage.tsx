@@ -4,33 +4,25 @@ import {
   User, Lock, Shield, LogOut, Save, Eye, EyeOff,
   CheckCircle2, AlertCircle, Loader2, ChevronRight,
   Palette, Bot, Move, LockKeyhole, LockKeyholeOpen, RotateCcw, MapPin,
-  Sun, Moon, Sparkles, MousePointer2,
+  Sun, Moon, Sparkles, Monitor, MousePointer2,
 } from 'lucide-react'
 import { RootState } from '../store'
 import { logout } from '../store/slices/authSlice'
 import { api } from '../utils/api'
 import { CHATBOT_POS_KEY, CHATBOT_LOCK_KEY } from '../components/chatbot/Chatbot'
 import { setThemeMode, setCursorStyle, ThemeMode, CursorStyle } from '../store/slices/themeSlice'
+import { ROLE_LABELS, ROLE_AVATAR_GRADIENT, ROLE_BADGE_SIMPLE } from '../constants/roles'
+import { useToast } from '../components/shared'
 
-const ROLE_COLORS: Record<string, string> = {
-  ceo:       'from-purple-500 to-violet-600',
-  coo:       'from-indigo-500 to-blue-600',
-  pm:        'from-blue-500 to-cyan-600',
-  team_lead: 'from-teal-500 to-emerald-600',
-  employee:  'from-slate-400 to-gray-500',
-}
-const ROLE_BADGE: Record<string, string> = {
-  ceo:       'bg-purple-100 text-purple-700',
-  coo:       'bg-indigo-100 text-indigo-700',
-  pm:        'bg-blue-100 text-blue-700',
-  team_lead: 'bg-teal-100 text-teal-700',
-  employee:  'bg-gray-100 text-gray-600',
-}
+// Aliases for local readability
+const ROLE_COLORS = ROLE_AVATAR_GRADIENT
+const ROLE_BADGE  = ROLE_BADGE_SIMPLE
 
 type TabKey = 'profile' | 'password' | 'account' | 'appearance'
 
 export const SettingsPage: React.FC = () => {
   const dispatch = useDispatch()
+  const toast = useToast()
   const { user } = useSelector((s: RootState) => s.auth)
 
   const themeMode   = useSelector((s: RootState) => s.theme?.mode   || 'light')
@@ -75,7 +67,7 @@ export const SettingsPage: React.FC = () => {
   }
 
   const role = user?.primary_role || 'employee'
-  const roleLabel = (r: string) => r.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const roleLabel = (r: string) => ROLE_LABELS[r as keyof typeof ROLE_LABELS] || r.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
 
   const flash = (type: 'success' | 'error', msg: string) => {
     if (type === 'success') { setSuccess(msg); setError('') }
@@ -88,8 +80,10 @@ export const SettingsPage: React.FC = () => {
     setSaving(true)
     try {
       await api.patch('/users/me', profileForm)
+      toast.success('Profile updated successfully')
       flash('success', 'Profile updated successfully')
     } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to update profile')
       flash('error', err?.response?.data?.detail || 'Failed to update profile')
     } finally {
       setSaving(false)
@@ -112,9 +106,11 @@ export const SettingsPage: React.FC = () => {
         current_password: passwordForm.current_password,
         new_password: passwordForm.new_password,
       })
+      toast.success('Password changed successfully')
       flash('success', 'Password changed successfully')
       setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
     } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to change password')
       flash('error', err?.response?.data?.detail || 'Failed to change password')
     } finally {
       setSaving(false)
@@ -350,23 +346,24 @@ export const SettingsPage: React.FC = () => {
                   accent: 'from-slate-500 to-slate-700',
                 },
                 {
-                  key: 'midnight' as ThemeMode,
-                  label: 'Midnight',
-                  icon: <Sparkles size={16} />,
+                  key: 'auto' as ThemeMode,
+                  label: 'System',
+                  icon: <Monitor size={16} />,
                   preview: (
-                    <div className="w-full h-14 rounded-xl overflow-hidden border border-purple-900 flex">
-                      <div className="w-1/3 bg-[#0d0f2b] border-r border-[#1e2142] flex flex-col gap-1 p-1.5">
-                        <div className="w-full h-1.5 bg-[#252660] rounded-full" />
-                        <div className="w-3/4 h-1.5 bg-[#1e2142] rounded-full" />
-                        <div className="w-2/3 h-1.5 bg-[#1e2142] rounded-full" />
+                    <div className="w-full h-14 rounded-xl overflow-hidden border border-gray-200 flex">
+                      <div className="w-1/2 bg-white border-r border-gray-200 flex flex-col gap-1 p-1.5">
+                        <div className="w-full h-1.5 bg-gray-200 rounded-full" />
+                        <div className="w-3/4 h-1.5 bg-gray-100 rounded-full" />
+                        <div className="w-2/3 h-3 bg-blue-100 rounded mt-1" />
                       </div>
-                      <div className="flex-1 bg-[#060614] p-1.5 flex flex-col gap-1">
-                        <div className="w-full h-3 bg-[#0d0f2b] rounded border border-[#1e2142]" />
-                        <div className="w-2/3 h-3 rounded" style={{ background: 'rgba(124,58,237,0.3)' }} />
+                      <div className="w-1/2 bg-slate-900 flex flex-col gap-1 p-1.5">
+                        <div className="w-full h-1.5 bg-slate-600 rounded-full" />
+                        <div className="w-3/4 h-1.5 bg-slate-700 rounded-full" />
+                        <div className="w-2/3 h-3 bg-blue-900 rounded mt-1" />
                       </div>
                     </div>
                   ),
-                  accent: 'from-violet-600 to-purple-800',
+                  accent: 'from-teal-500 to-cyan-600',
                 },
               ] as const).map(({ key, label, icon, preview, accent }) => (
                 <button

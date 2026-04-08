@@ -10,6 +10,8 @@ import { RootState } from '../store'
 import { fetchTasksRequest, createTaskRequest, updateTaskLocal } from '../store/slices/tasksSlice'
 import { fetchProjectsRequest } from '../store/slices/projectsSlice'
 import { api } from '../utils/api'
+import { MANAGER_ROLES } from '../constants/roles'
+import { useToast } from '../components/shared'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,6 +75,7 @@ const emptyForm = {
 
 export const TasksPage: React.FC = () => {
   const dispatch = useDispatch()
+  const toast = useToast()
   const { items, total, isLoading } = useSelector((s: RootState) => s.tasks)
   const { items: projects } = useSelector((s: RootState) => s.projects)
   const { user } = useSelector((s: RootState) => s.auth)
@@ -97,7 +100,7 @@ export const TasksPage: React.FC = () => {
   const [statusUpdating, setStatusUpdating]   = useState(false)
   const [taskSaving, setTaskSaving]           = useState(false)
 
-  const isManager = ['ceo', 'coo', 'admin', 'pm', 'team_lead'].includes(user?.primary_role || '')
+  const isManager = MANAGER_ROLES.includes(user?.primary_role as any)
 
   useEffect(() => {
     const params: any = { page, limit }
@@ -171,10 +174,13 @@ export const TasksPage: React.FC = () => {
     setStatusUpdating(true)
     try {
       await api.patch(`/tasks/${detailTask.id}/status`, { status: newStatus })
+      toast.success('Task status updated')
       dispatch(updateTaskLocal({ id: detailTask.id, updates: { status: newStatus } }))
       setDetailTask((prev: any) => prev ? { ...prev, status: newStatus } : prev)
       setEditForm((prev: any) => prev ? { ...prev, status: newStatus } : prev)
-    } catch {}
+    } catch {
+      toast.error('Failed to update task status')
+    }
     setStatusUpdating(false)
   }
 
@@ -193,6 +199,7 @@ export const TasksPage: React.FC = () => {
         due_date:     editForm.due_date ? new Date(editForm.due_date).toISOString() : null,
       }
       await api.put(`/tasks/${detailTask.id}`, payload)
+      toast.success('Task updated')
       dispatch(updateTaskLocal({ id: detailTask.id, updates: {
         title: payload.title, description: payload.description,
         status: payload.status, priority: payload.priority,
@@ -205,7 +212,9 @@ export const TasksPage: React.FC = () => {
       if (filterPriority) params.priority   = filterPriority
       dispatch(fetchTasksRequest(params))
       setDetailTask(null)
-    } catch {}
+    } catch {
+      toast.error('Failed to update task')
+    }
     setTaskSaving(false)
   }
 

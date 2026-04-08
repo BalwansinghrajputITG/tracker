@@ -9,6 +9,8 @@ import { fetchTeamsRequest } from '../store/slices/teamsSlice'
 import { fetchUsersRequest } from '../store/slices/usersSlice'
 import { api } from '../utils/api'
 import { navigate } from './AppLayout'
+import { MANAGER_ROLES, EXEC_ROLES } from '../constants/roles'
+import { useToast } from '../components/shared'
 
 const _DEPT_COLOR_PALETTE = [
   'bg-blue-100 text-blue-700',
@@ -35,6 +37,7 @@ const AVATAR_GRADIENTS = [
 
 export const TeamsPage: React.FC = () => {
   const dispatch = useDispatch()
+  const toast = useToast()
   const { items: teams, isLoading, error, total } = useSelector((s: RootState) => s.teams)
   const { items: users, subordinates } = useSelector((s: RootState) => s.users)
   const { user } = useSelector((s: RootState) => s.auth)
@@ -64,11 +67,11 @@ export const TeamsPage: React.FC = () => {
   const [removingMember, setRemovingMember] = useState<string | null>(null)     // userId being removed
   const [showQuickAdd, setShowQuickAdd] = useState(false)
 
-  const isAdmin = ['ceo', 'coo'].includes(user?.primary_role || '')
-  const canCreate = ['ceo', 'coo', 'pm', 'team_lead'].includes(user?.primary_role || '')
+  const isAdmin = EXEC_ROLES.includes(user?.primary_role as any)
+  const canCreate = MANAGER_ROLES.includes(user?.primary_role as any)
   const canManageTeam = (team?: any) => {
     const role = user?.primary_role || ''
-    if (['ceo', 'coo', 'pm'].includes(role)) return true
+    if ([...EXEC_ROLES, 'pm'].includes(role)) return true
     if (role === 'team_lead' && team) return team.lead_id === (user as any)?.id
     return false
   }
@@ -78,9 +81,11 @@ export const TeamsPage: React.FC = () => {
     setTeamActionError('')
     try {
       await api.delete(`/teams/${teamId}/members/${userId}`)
+      toast.success('Member removed')
       setSelectedTeam((t: any) => t ? { ...t, member_ids: t.member_ids.filter((id: string) => id !== userId) } : t)
       dispatch(fetchTeamsRequest({ page, limit }))
     } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to remove member')
       setTeamActionError(err?.response?.data?.detail || 'Failed to remove member')
     } finally {
       setRemovingMember(null)
@@ -92,9 +97,11 @@ export const TeamsPage: React.FC = () => {
     setTeamActionError('')
     try {
       await api.post(`/teams/${teamId}/members`, { user_ids: [userId] })
+      toast.success('Member added')
       setSelectedTeam((t: any) => t ? { ...t, member_ids: [...(t.member_ids || []), userId] } : t)
       dispatch(fetchTeamsRequest({ page, limit }))
     } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to add member')
       setTeamActionError(err?.response?.data?.detail || 'Failed to add member')
     } finally {
       setQuickAddLoading(null)
@@ -120,11 +127,13 @@ export const TeamsPage: React.FC = () => {
     setCreateError('')
     try {
       await api.post('/teams', { ...form, pm_id: form.pm_id || undefined })
+      toast.success('Team created')
       dispatch(fetchTeamsRequest({ page, limit }))
       setShowModal(false)
       setForm({ name: '', description: '', department: '', lead_id: '', pm_id: '', member_ids: [] })
       setMemberSearch('')
     } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to create team')
       setCreateError(err?.response?.data?.detail || 'Failed to create team')
     } finally {
       setCreating(false)
@@ -602,11 +611,13 @@ export const TeamsPage: React.FC = () => {
                         setTeamActionError('')
                         try {
                           await api.put(`/teams/${selectedTeam.id}`, editTeamForm)
+                          toast.success('Team updated')
                           setSelectedTeam({ ...selectedTeam, ...editTeamForm })
                           dispatch(fetchTeamsRequest())
                           setTeamMode('view')
                           setEditMemberSearch('')
                         } catch (err: any) {
+                          toast.error(err?.response?.data?.detail || 'Failed to update team')
                           setTeamActionError(err?.response?.data?.detail || 'Failed to update team')
                         } finally {
                           setTeamActionLoading(false)
@@ -638,10 +649,12 @@ export const TeamsPage: React.FC = () => {
                         setTeamActionError('')
                         try {
                           await api.delete(`/teams/${selectedTeam.id}`)
+                          toast.success('Team deleted')
                           setSelectedTeam(null)
                           setTeamMode('view')
                           dispatch(fetchTeamsRequest())
                         } catch (err: any) {
+                          toast.error(err?.response?.data?.detail || 'Failed to delete team')
                           setTeamActionError(err?.response?.data?.detail || 'Failed to delete team')
                           setTeamActionLoading(false)
                         }

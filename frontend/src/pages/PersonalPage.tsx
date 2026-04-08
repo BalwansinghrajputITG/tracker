@@ -11,6 +11,7 @@ import { Modal } from '../components/common/Modal'
 import { RootState } from '../store'
 import { api } from '../utils/api'
 import SheetsPage from './SheetsPage'
+import { useToast } from '../components/shared'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -137,6 +138,7 @@ interface PersonalPageProps {
 }
 
 export const PersonalPage: React.FC<PersonalPageProps> = ({ embedded = false }) => {
+  const toast = useToast()
   const { user } = useSelector((s: RootState) => s.auth)
   const [tab, setTab] = useState<'workspace' | 'targets' | 'performance' | 'sheets'>('workspace')
 
@@ -216,18 +218,27 @@ export const PersonalPage: React.FC<PersonalPageProps> = ({ embedded = false }) 
       if (linkEdit) {
         await api.put(`/personal/links/${linkEdit.id}`, linkForm)
         setLinks(prev => prev.map(l => l.id === linkEdit.id ? { ...l, ...linkForm } : l))
+        toast.success('Link updated')
       } else {
         const res = await api.post('/personal/links', linkForm)
         setLinks(prev => [{ id: res.data.link_id, ...linkForm, created_at: new Date().toISOString() }, ...prev])
+        toast.success('Link added')
       }
       setLinkModal(false)
-    } catch (_) {}
+    } catch (_) {
+      toast.error('Failed to save link')
+    }
     setLinkSaving(false)
   }
 
   const deleteLink = async (id: string) => {
-    await api.delete(`/personal/links/${id}`)
-    setLinks(prev => prev.filter(l => l.id !== id))
+    try {
+      await api.delete(`/personal/links/${id}`)
+      setLinks(prev => prev.filter(l => l.id !== id))
+      toast.success('Link deleted')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete link')
+    }
   }
 
   // ── Notes ─────────────────────────────────────────────────────────────────
@@ -244,27 +255,41 @@ export const PersonalPage: React.FC<PersonalPageProps> = ({ embedded = false }) 
       if (noteEdit) {
         await api.put(`/personal/notes/${noteEdit.id}`, noteForm)
         setNotes(prev => prev.map(n => n.id === noteEdit.id ? { ...n, ...noteForm, updated_at: new Date().toISOString() } : n))
+        toast.success('Note updated')
       } else {
         const res = await api.post('/personal/notes', noteForm)
         setNotes(prev => [{
           id: res.data.note_id, ...noteForm, pinned: false,
           created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         }, ...prev])
+        toast.success('Note created')
       }
       setNoteModal(false)
-    } catch (_) {}
+    } catch (_) {
+      toast.error('Failed to save note')
+    }
     setNoteSaving(false)
   }
 
   const togglePin = async (note: StickyNote) => {
-    await api.put(`/personal/notes/${note.id}`, { pinned: !note.pinned })
-    setNotes(prev => prev.map(n => n.id === note.id ? { ...n, pinned: !n.pinned } : n)
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned)))
+    try {
+      await api.put(`/personal/notes/${note.id}`, { pinned: !note.pinned })
+      setNotes(prev => prev.map(n => n.id === note.id ? { ...n, pinned: !n.pinned } : n)
+        .sort((a, b) => Number(b.pinned) - Number(a.pinned)))
+      toast.success(note.pinned ? 'Note unpinned' : 'Note pinned')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to update pin')
+    }
   }
 
   const deleteNote = async (id: string) => {
-    await api.delete(`/personal/notes/${id}`)
-    setNotes(prev => prev.filter(n => n.id !== id))
+    try {
+      await api.delete(`/personal/notes/${id}`)
+      setNotes(prev => prev.filter(n => n.id !== id))
+      toast.success('Note deleted')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete note')
+    }
   }
 
   // ── Targets ───────────────────────────────────────────────────────────────
@@ -289,33 +314,47 @@ export const PersonalPage: React.FC<PersonalPageProps> = ({ embedded = false }) 
       if (targetEdit) {
         await api.put(`/personal/targets/${targetEdit.id}`, payload)
         setTargets(prev => prev.map(t => t.id === targetEdit.id ? { ...t, ...payload } : t))
+        toast.success('Target updated')
       } else {
         const res = await api.post('/personal/targets', payload)
         setTargets(prev => [{
           id: res.data.target_id, ...payload, current_value: 0, completed: false,
           created_at: new Date().toISOString(),
         }, ...prev])
+        toast.success('Target created')
       }
       setTargetModal(false)
-    } catch (_) {}
+    } catch (_) {
+      toast.error('Failed to save target')
+    }
     setTargetSaving(false)
   }
 
   const saveProgress = async (id: string, val: string) => {
     const v = parseFloat(val)
     if (isNaN(v) || v < 0) return
-    await api.put(`/personal/targets/${id}`, { current_value: v })
-    setTargets(prev => prev.map(t => {
-      if (t.id !== id) return t
-      const completed = v >= t.target_value
-      return { ...t, current_value: v, completed }
-    }))
-    setProgressEdit(null)
+    try {
+      await api.put(`/personal/targets/${id}`, { current_value: v })
+      setTargets(prev => prev.map(t => {
+        if (t.id !== id) return t
+        const completed = v >= t.target_value
+        return { ...t, current_value: v, completed }
+      }))
+      setProgressEdit(null)
+      toast.success('Progress updated')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to update progress')
+    }
   }
 
   const deleteTarget = async (id: string) => {
-    await api.delete(`/personal/targets/${id}`)
-    setTargets(prev => prev.filter(t => t.id !== id))
+    try {
+      await api.delete(`/personal/targets/${id}`)
+      setTargets(prev => prev.filter(t => t.id !== id))
+      toast.success('Target deleted')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete target')
+    }
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────

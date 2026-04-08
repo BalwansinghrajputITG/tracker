@@ -6,6 +6,8 @@ import {
   ChevronDown, ChevronUp, Shield, Building2, Phone,
 } from 'lucide-react'
 import { api } from '../../utils/api'
+import { useToast } from '../shared'
+import { ANALYTICS_ROLES, EXEC_ROLES } from '../../constants/roles'
 import { RootState } from '../../store'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -74,8 +76,8 @@ const InlineMsg: React.FC<{ msg: string; isError?: boolean }> = ({ msg, isError 
 export const EntityCards: React.FC<Props> = ({ data, callerRole, onAction }) => {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
 
-  const canManage = ['ceo', 'coo', 'pm', 'team_lead'].includes(callerRole)
-  const isExec = ['ceo', 'coo'].includes(callerRole)
+  const canManage = ANALYTICS_ROLES.includes(callerRole as any)
+  const isExec = EXEC_ROLES.includes(callerRole as any)
 
   const toggle = (i: number) => setSelectedIdx(prev => prev === i ? null : i)
 
@@ -226,6 +228,7 @@ const DetailPanel: React.FC<{
   onClose: () => void
   onAction?: (msg: string) => void
 }> = ({ item, type, callerRole, canManage, isExec, onClose, onAction }) => {
+  const toastNotify = useToast()
   const { items: projects } = useSelector((s: RootState) => s.projects)
 
   const [mode, setMode] = useState<'view' | 'edit' | 'assign' | 'status' | 'confirm-delete'>('view')
@@ -256,9 +259,11 @@ const DetailPanel: React.FC<{
         await api.put(`/projects/${p.id}`, editForm)
         setLocalItem({ ...p, ...editForm })
         showToast('Project updated successfully')
+        toastNotify.success('Project updated')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to update', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to update project')
         setSaving(false)
       }
     }
@@ -269,9 +274,11 @@ const DetailPanel: React.FC<{
         await api.delete(`/projects/${p.id}`)
         setLocalItem({ ...p, status: 'cancelled' })
         showToast('Project cancelled')
+        toastNotify.success('Project cancelled')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to cancel', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to cancel project')
         setSaving(false)
       }
     }
@@ -395,9 +402,11 @@ const DetailPanel: React.FC<{
         await api.put(`/users/${u.id}`, editForm)
         setLocalItem({ ...u, ...editForm })
         showToast('User updated')
+        toastNotify.success('User updated')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to update', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to update user')
         setSaving(false)
       }
     }
@@ -408,9 +417,11 @@ const DetailPanel: React.FC<{
         await api.delete(`/users/${u.id}`)
         setLocalItem({ ...u, is_active: false })
         showToast(`${u.full_name} deactivated`)
+        toastNotify.success('User deactivated')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to deactivate', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to deactivate user')
         setSaving(false)
       }
     }
@@ -421,9 +432,11 @@ const DetailPanel: React.FC<{
       try {
         await api.post(`/projects/${selectedProjectId}/members/${u.id}`)
         showToast('Added to project')
+        toastNotify.success('Assigned to project')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to assign', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to assign project')
         setSaving(false)
       }
     }
@@ -559,9 +572,11 @@ const DetailPanel: React.FC<{
         await api.put(`/teams/${t.id}`, editForm)
         setLocalItem({ ...t, ...editForm })
         showToast('Team updated')
+        toastNotify.success('Team updated')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to update', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to update team')
         setSaving(false)
       }
     }
@@ -572,9 +587,11 @@ const DetailPanel: React.FC<{
         await api.delete(`/teams/${t.id}`)
         setLocalItem({ ...t, is_active: false })
         showToast('Team deleted')
+        toastNotify.success('Team deleted')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to delete', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to delete team')
         setSaving(false)
       }
     }
@@ -683,9 +700,11 @@ const DetailPanel: React.FC<{
         await api.delete(`/reports/${r.id}`)
         setLocalItem({ ...r, _deleted: true })
         showToast('Report deleted')
+        toastNotify.success('Report deleted')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to delete', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to delete report')
         setSaving(false)
       }
     }
@@ -772,9 +791,11 @@ const DetailPanel: React.FC<{
         await api.put(`/tasks/${t.id}`, { status: selectedStatus })
         setLocalItem({ ...t, status: selectedStatus })
         showToast(`Status updated to ${selectedStatus}`)
+        toastNotify.success('Task status updated')
         resetMode()
       } catch (err: any) {
         showToast(err?.response?.data?.detail || 'Failed to update', true)
+        toastNotify.error(err?.response?.data?.detail || 'Failed to update task')
         setSaving(false)
       }
     }

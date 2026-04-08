@@ -17,6 +17,7 @@ import {
   fetchDashboardRequest, setPeriod, setActiveTab, markAlertsRead,
 } from '../store/slices/digitalMarketingSlice'
 import { api } from '../utils/api'
+import { useToast } from '../components/shared'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -598,6 +599,7 @@ const PERIODS: Array<{ key: '7d' | '30d' | '90d'; label: string }> = [
 
 export const DigitalMarketingPage: React.FC = () => {
   const dispatch = useDispatch()
+  const toast = useToast()
   const { dashboard, period, activeTab, isLoading, error } = useSelector(
     (s: RootState) => s.digitalMarketing
   )
@@ -613,7 +615,10 @@ export const DigitalMarketingPage: React.FC = () => {
   const handleMarkAllRead = async () => {
     try {
       await api.post('/digital-marketing/alerts/read-all')
-    } catch {}
+      toast.success('All alerts marked as read')
+    } catch {
+      toast.error('Failed to mark alerts as read')
+    }
     dispatch(markAlertsRead())
   }
 

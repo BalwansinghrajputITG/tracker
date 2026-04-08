@@ -11,6 +11,8 @@ import { RootState } from '../store'
 import { fetchSheetsRequest } from '../store/slices/sheetsSlice'
 import { fetchProjectsRequest } from '../store/slices/projectsSlice'
 import { api } from '../utils/api'
+import { ANALYTICS_ROLES } from '../constants/roles'
+import { useToast } from '../components/shared'
 import { Modal } from '../components/common/Modal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -855,6 +857,7 @@ function EditDocModal({ doc, projects, onClose, onSaved }: { doc: DocumentLink; 
 
 export default function SheetsPage() {
   const dispatch = useDispatch()
+  const toast = useToast()
   const rawSheets  = useSelector((s: RootState) => (s as any).sheets?.items ?? [])
   const projects   = useSelector((s: RootState) => s.projects.items)
   const currentUser = useSelector((s: RootState) => s.auth.user)
@@ -867,15 +870,9 @@ export default function SheetsPage() {
   const [changeNotes, setChangeNotes] = useState<ChangeNote[]>([])
   const [loadingNotes, setLoadingNotes] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
-  const canManage = ['ceo', 'coo', 'pm', 'team_lead'].includes(currentUser?.primary_role || '')
+  const canManage = ANALYTICS_ROLES.includes(currentUser?.primary_role as any)
   const currentUserId = String(currentUser?.user_id || '')
-
-  const showToast = (type: 'success' | 'error', msg: string) => {
-    setToast({ type, msg })
-    setTimeout(() => setToast(null), 3500)
-  }
 
   const loadDocs = useCallback(() => {
     const params: any = {}
@@ -948,9 +945,9 @@ export default function SheetsPage() {
         updated_at: now,
       }])
       loadDocs()
-      showToast('success', 'Change logged')
+      toast.success('Change logged')
     } catch {
-      showToast('error', 'Failed to log change')
+      toast.error('Failed to log change')
     }
   }
 
@@ -961,16 +958,17 @@ export default function SheetsPage() {
       setChangeNotes(prev => prev.filter(n => n.id !== noteId))
       loadDocs()
     } catch {
-      showToast('error', 'Failed to delete note')
+      toast.error('Failed to delete note')
     }
   }
 
   const handlePin = async (doc: DocumentLink) => {
     try {
       await api.put(`/sheets/${doc.id}`, { is_pinned: !doc.is_pinned })
+      toast.success(doc.is_pinned ? 'Document unpinned' : 'Document pinned')
       loadDocs()
     } catch {
-      showToast('error', 'Failed to update pin')
+      toast.error('Failed to update pin')
     }
   }
 
@@ -980,9 +978,9 @@ export default function SheetsPage() {
       setDeleteConfirmId(null)
       if (openDoc?.id === id) setOpenDoc(null)
       loadDocs()
-      showToast('success', 'Document removed')
+      toast.success('Document removed')
     } catch {
-      showToast('error', 'Failed to delete')
+      toast.error('Failed to delete')
       setDeleteConfirmId(null)
     }
   }
@@ -994,16 +992,6 @@ export default function SheetsPage() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Global Toast */}
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium ${
-          toast.type === 'success' ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800'
-        }`}>
-          {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          {toast.msg}
-        </div>
-      )}
-
       {openDoc ? (
         /* ── Detail View ──────────────────────────────────── */
         <DocumentDetailView
@@ -1149,7 +1137,7 @@ export default function SheetsPage() {
         <AddDocModal
           projects={projects as any}
           onClose={() => setShowAdd(false)}
-          onCreated={() => { setShowAdd(false); loadDocs(); showToast('success', 'Document added!') }}
+          onCreated={() => { setShowAdd(false); loadDocs(); toast.success('Document added') }}
         />
       )}
 
@@ -1159,7 +1147,7 @@ export default function SheetsPage() {
           doc={editDoc}
           projects={projects as any}
           onClose={() => setEditDoc(null)}
-          onSaved={() => { setEditDoc(null); loadDocs(); showToast('success', 'Saved') }}
+          onSaved={() => { setEditDoc(null); loadDocs(); toast.success('Document saved') }}
         />
       )}
     </div>

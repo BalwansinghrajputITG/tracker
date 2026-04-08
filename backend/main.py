@@ -6,7 +6,7 @@ from bson.errors import InvalidId
 
 from config import settings
 from database import mongodb, redis_client
-from routers import auth, users, teams, projects, tasks, reports, chat, notifications, chatbot, dashboard, analytics, digital_marketing, project_tools, sheets, personal, departments
+from routers import auth, users, teams, projects, tasks, reports, chat, notifications, chatbot, dashboard, analytics, digital_marketing, project_tools, sheets, personal, departments, basecamp
 from middleware.rate_limit import RateLimitMiddleware
 import logging
 
@@ -85,6 +85,7 @@ app.include_router(project_tools.router,     prefix=f"{prefix}/project-tools",  
 app.include_router(sheets.router,            prefix=f"{prefix}/sheets",               tags=["Sheets"])
 app.include_router(personal.router,         prefix=f"{prefix}/personal",             tags=["Personal"])
 app.include_router(departments.router,      prefix=f"{prefix}/departments",          tags=["Departments"])
+app.include_router(basecamp.router,         prefix=f"{prefix}/basecamp",             tags=["Basecamp"])
 
 
 @app.get("/health")

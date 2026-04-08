@@ -11,6 +11,8 @@ import { fetchTeamsRequest } from '../store/slices/teamsSlice'
 import { ToolsPicker, ProjectTool } from '../components/common/ToolsPicker'
 import { navigate } from './AppLayout'
 import { api } from '../utils/api'
+import { ROLE_ORDER, ROLE_LABELS, ROLE_AVATAR_GRADIENT, Role } from '../constants/roles'
+import { useToast } from '../components/shared'
 
 // ─── phase constants ──────────────────────────────────────────────────────────
 
@@ -20,36 +22,28 @@ const PHASE_LABELS: Record<string, string> = {
   completed: 'Completed', cancelled: 'Cancelled',
 }
 const PHASE_COLORS: Record<string, { badge: string; dot: string }> = {
-  planning:  { badge: 'bg-blue-100 text-blue-700 border-blue-200',    dot: 'bg-blue-500'   },
-  active:    { badge: 'bg-green-100 text-green-700 border-green-200',  dot: 'bg-green-500'  },
-  on_hold:   { badge: 'bg-amber-100 text-amber-700 border-amber-200',  dot: 'bg-amber-500'  },
+  planning:  { badge: 'bg-blue-100 text-blue-700 border-blue-200',      dot: 'bg-blue-500'   },
+  active:    { badge: 'bg-green-100 text-green-700 border-green-200',   dot: 'bg-green-500'  },
+  on_hold:   { badge: 'bg-amber-100 text-amber-700 border-amber-200',   dot: 'bg-amber-500'  },
   completed: { badge: 'bg-violet-100 text-violet-700 border-violet-200', dot: 'bg-violet-500' },
-  cancelled: { badge: 'bg-red-100 text-red-700 border-red-200',        dot: 'bg-red-500'    },
+  cancelled: { badge: 'bg-red-100 text-red-700 border-red-200',         dot: 'bg-red-500'    },
 }
 
 interface PhaseStageInput { name: string; description: string; due_date: string }
 
-// ─── constants ────────────────────────────────────────────────────────────────
+// ─── Role display colours for the member picker (local to this page) ──────────
+// These are section-colour chips, NOT the same as the global badge colours.
 
-const ROLE_ORDER = ['ceo', 'coo', 'pm', 'team_lead', 'employee']
-const ROLE_LABELS: Record<string, string> = {
-  ceo: 'CEO', coo: 'COO', pm: 'Project Managers',
-  team_lead: 'Team Leads', employee: 'Employees',
-}
 const ROLE_COLORS: Record<string, { bg: string; text: string; dot: string; badge: string }> = {
-  ceo:       { bg: 'bg-yellow-50',  text: 'text-yellow-700',  dot: 'bg-yellow-400',  badge: 'bg-yellow-100 text-yellow-700'  },
-  coo:       { bg: 'bg-orange-50',  text: 'text-orange-700',  dot: 'bg-orange-400',  badge: 'bg-orange-100 text-orange-700'  },
-  pm:        { bg: 'bg-indigo-50',  text: 'text-indigo-700',  dot: 'bg-indigo-400',  badge: 'bg-indigo-100 text-indigo-700'  },
-  team_lead: { bg: 'bg-blue-50',    text: 'text-blue-700',    dot: 'bg-blue-400',    badge: 'bg-blue-100 text-blue-700'      },
-  employee:  { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-400', badge: 'bg-emerald-100 text-emerald-700'},
+  ceo:       { bg: 'bg-purple-50', text: 'text-purple-700', dot: 'bg-purple-400', badge: 'bg-purple-100 text-purple-700' },
+  coo:       { bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-400', badge: 'bg-indigo-100 text-indigo-700' },
+  admin:     { bg: 'bg-rose-50',   text: 'text-rose-700',   dot: 'bg-rose-400',   badge: 'bg-rose-100 text-rose-700'     },
+  pm:        { bg: 'bg-blue-50',   text: 'text-blue-700',   dot: 'bg-blue-400',   badge: 'bg-blue-100 text-blue-700'     },
+  team_lead: { bg: 'bg-teal-50',   text: 'text-teal-700',   dot: 'bg-teal-400',   badge: 'bg-teal-100 text-teal-700'     },
+  employee:  { bg: 'bg-gray-50',   text: 'text-gray-600',   dot: 'bg-gray-400',   badge: 'bg-gray-100 text-gray-600'     },
 }
-const AVATAR_GRADIENTS = [
-  'from-blue-400 to-indigo-500', 'from-purple-400 to-pink-500',
-  'from-emerald-400 to-teal-500', 'from-orange-400 to-red-500',
-  'from-cyan-400 to-blue-500', 'from-rose-400 to-pink-500',
-]
 const getGradient = (name: string) =>
-  AVATAR_GRADIENTS[(name || 'A').charCodeAt(0) % AVATAR_GRADIENTS.length]
+  ROLE_AVATAR_GRADIENT[(name as keyof typeof ROLE_AVATAR_GRADIENT)] || ROLE_AVATAR_GRADIENT.employee
 
 const emptyForm = {
   name: '', description: '', priority: 'medium',
@@ -118,7 +112,7 @@ const MemberPanel: React.FC<{
       .filter(r => map[r]?.length)
       .map(r => ({ role: r, users: map[r] }))
       .concat(
-        Object.keys(map)
+        (Object.keys(map) as Role[])
           .filter(r => !ROLE_ORDER.includes(r))
           .map(r => ({ role: r, users: map[r] }))
       )
@@ -287,6 +281,7 @@ const MemberPanel: React.FC<{
 
 export const CreateProjectPage: React.FC = () => {
   const dispatch = useDispatch()
+  const toast = useToast()
   const { isLoading, error } = useSelector((s: RootState) => s.projects)
   const { items: teams } = useSelector((s: RootState) => s.teams)
 
@@ -319,10 +314,13 @@ export const CreateProjectPage: React.FC = () => {
     setSubmitError('')
     try {
       await api.post('/projects', form)
+      toast.success('Project created successfully')
       navigate('/projects')
     } catch (err: any) {
       const d = err?.response?.data?.detail
-      setSubmitError(typeof d === 'string' ? d : Array.isArray(d) ? d.map((e: any) => e.msg).join(' · ') : 'Failed to create project')
+      const errMsg = typeof d === 'string' ? d : Array.isArray(d) ? d.map((e: any) => e.msg).join(' · ') : 'Failed to create project'
+      toast.error(errMsg)
+      setSubmitError(errMsg)
       setSubmitting(false)
     }
   }

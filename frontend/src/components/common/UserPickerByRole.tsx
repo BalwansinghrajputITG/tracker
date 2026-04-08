@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Search, UserCheck, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { ROLE_ORDER, ROLE_LABELS, ROLE_AVATAR_GRADIENT, Role } from '../../constants/roles'
 
 export interface PickerUser {
   id: string
@@ -16,29 +17,18 @@ interface Props {
   maxHeight?: string
 }
 
-const ROLE_ORDER = ['ceo', 'coo', 'pm', 'team_lead', 'employee']
-const ROLE_LABELS: Record<string, string> = {
-  ceo:       'CEO',
-  coo:       'COO',
-  pm:        'Project Managers',
-  team_lead: 'Team Leads',
-  employee:  'Employees',
-}
+// Picker uses the same colour palette as the global role constants
 const ROLE_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  ceo:       { bg: 'bg-yellow-50',  text: 'text-yellow-700', dot: 'bg-yellow-400' },
-  coo:       { bg: 'bg-orange-50',  text: 'text-orange-700', dot: 'bg-orange-400' },
-  pm:        { bg: 'bg-indigo-50',  text: 'text-indigo-700', dot: 'bg-indigo-400' },
-  team_lead: { bg: 'bg-blue-50',    text: 'text-blue-700',   dot: 'bg-blue-400'   },
-  employee:  { bg: 'bg-emerald-50', text: 'text-emerald-700',dot: 'bg-emerald-400'},
+  ceo:       { bg: 'bg-purple-50', text: 'text-purple-700', dot: 'bg-purple-400' },
+  coo:       { bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-400' },
+  admin:     { bg: 'bg-rose-50',   text: 'text-rose-700',   dot: 'bg-rose-400'   },
+  pm:        { bg: 'bg-blue-50',   text: 'text-blue-700',   dot: 'bg-blue-400'   },
+  team_lead: { bg: 'bg-teal-50',   text: 'text-teal-700',   dot: 'bg-teal-400'   },
+  employee:  { bg: 'bg-gray-50',   text: 'text-gray-600',   dot: 'bg-gray-400'   },
 }
 
-const AVATAR_GRADIENTS = [
-  'from-blue-400 to-indigo-500', 'from-purple-400 to-pink-500',
-  'from-emerald-400 to-teal-500', 'from-orange-400 to-red-500',
-  'from-cyan-400 to-blue-500', 'from-rose-400 to-pink-500',
-]
-const getGradient = (name: string) =>
-  AVATAR_GRADIENTS[(name || 'A').charCodeAt(0) % AVATAR_GRADIENTS.length]
+const getGradient = (role: string) =>
+  ROLE_AVATAR_GRADIENT[role as keyof typeof ROLE_AVATAR_GRADIENT] || ROLE_AVATAR_GRADIENT.employee
 
 export const UserPickerByRole: React.FC<Props> = ({
   users,
@@ -86,7 +76,7 @@ export const UserPickerByRole: React.FC<Props> = ({
       .filter(r => map[r]?.length)
       .map(r => ({ role: r, users: map[r] }))
       .concat(
-        Object.keys(map)
+        (Object.keys(map) as Role[])
           .filter(r => !ROLE_ORDER.includes(r))
           .map(r => ({ role: r, users: map[r] }))
       )
@@ -114,7 +104,7 @@ export const UserPickerByRole: React.FC<Props> = ({
               key={u.id}
               className="flex items-center gap-1.5 bg-white border border-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-lg font-medium shadow-sm"
             >
-              <span className={`w-4 h-4 bg-gradient-to-br ${getGradient(u.full_name)} rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0`}>
+              <span className={`w-4 h-4 bg-gradient-to-br ${getGradient(u.primary_role || 'employee')} rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0`}>
                 {u.full_name[0]}
               </span>
               {u.full_name.split(' ')[0]}
@@ -199,7 +189,7 @@ export const UserPickerByRole: React.FC<Props> = ({
                         className="rounded accent-blue-600 shrink-0"
                       />
                       <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0 bg-gradient-to-br ${
-                        checked ? getGradient(u.full_name) : 'from-gray-300 to-gray-400'
+                        checked ? getGradient(u.primary_role || 'employee') : 'from-gray-300 to-gray-400'
                       }`}>
                         {u.full_name[0]}
                       </div>
