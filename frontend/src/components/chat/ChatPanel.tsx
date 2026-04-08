@@ -198,7 +198,7 @@ const DateDivider: React.FC<{ label: string }> = ({ label }) => (
 
 export const ChatPanel: React.FC = () => {
   const dispatch = useDispatch()
-  const { rooms, activeRoomId, messages, typingUsers, isConnected, contacts } = useSelector(
+  const { rooms, activeRoomId, messages, typingUsers, isConnected, contacts, isLoading: chatLoading } = useSelector(
     (s: RootState) => s.chat
   )
   const currentUser = useSelector((s: RootState) => s.auth.user)
@@ -213,6 +213,16 @@ export const ChatPanel: React.FC = () => {
     dispatch(fetchRoomsRequest())
     dispatch(fetchContactsRequest())
   }, [])
+
+  // Once rooms load, if a room was pre-selected (e.g. navigated from another page),
+  // re-dispatch setActiveRoom so the chat area renders it.
+  const roomsLoaded = rooms.length > 0
+  useEffect(() => {
+    if (roomsLoaded && activeRoomId) {
+      const found = rooms.find(r => r.id === activeRoomId)
+      if (found) dispatch(setActiveRoom(activeRoomId))
+    }
+  }, [roomsLoaded])
 
   useEffect(() => {
     if (activeRoomId) dispatch(fetchMessagesRequest({ roomId: activeRoomId }))
@@ -422,11 +432,13 @@ export const ChatPanel: React.FC = () => {
 
       {/* ── Chat Area ── */}
       <div className="flex-1 flex flex-col min-w-0 bg-white">
-        {activeRoom ? (
+        {(activeRoom || (activeRoomId && chatLoading)) ? (
           <>
             {/* Chat Header */}
             <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-white shrink-0">
-              {isGroupRoom ? (
+              {!activeRoom ? (
+                <div className="w-9 h-9 rounded-full bg-gray-100 animate-pulse shrink-0" />
+              ) : isGroupRoom ? (
                 <div className="w-9 h-9 rounded-full bg-[#6264A7] flex items-center justify-center shrink-0">
                   <Hash size={15} className="text-white" />
                 </div>
@@ -437,9 +449,9 @@ export const ChatPanel: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-gray-900 truncate">
-                    {activeRoom.name || (isGroupRoom ? 'Group Chat' : 'Direct Message')}
+                    {activeRoom?.name || (isGroupRoom ? 'Group Chat' : 'Loading…')}
                   </p>
-                  {activeRoom.other_user_role && (
+                  {activeRoom?.other_user_role && (
                     <span className="text-xs text-gray-500 capitalize shrink-0">
                       {activeRoom.other_user_role.replace('_', ' ')}
                     </span>
@@ -447,7 +459,7 @@ export const ChatPanel: React.FC = () => {
                 </div>
                 <p className="text-xs text-gray-500">
                   {isGroupRoom
-                    ? `${activeRoom.participants?.length || 0} members`
+                    ? `${activeRoom?.participants?.length || 0} members`
                     : 'Available'
                   }
                 </p>
@@ -474,16 +486,16 @@ export const ChatPanel: React.FC = () => {
                   <div className="w-14 h-14 rounded-full bg-[#6264A7]/10 flex items-center justify-center mb-4">
                     {isGroupRoom
                       ? <Hash size={22} className="text-[#6264A7]" />
-                      : <Avatar name={activeRoom.name || 'User'} size="lg" />
+                      : <Avatar name={activeRoom?.name || 'User'} size="lg" />
                     }
                   </div>
                   <p className="text-base font-semibold text-gray-800">
-                    {activeRoom.name || 'Direct Message'}
+                    {activeRoom?.name || 'Direct Message'}
                   </p>
                   <p className="text-sm text-gray-500 mt-1 max-w-xs">
                     {isGroupRoom
                       ? 'This is the beginning of your group conversation.'
-                      : `This is the beginning of your conversation with ${activeRoom.name}.`
+                      : `This is the beginning of your conversation with ${activeRoom?.name || 'this user'}.`
                     }
                   </p>
                 </div>

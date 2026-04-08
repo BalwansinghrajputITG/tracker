@@ -31,7 +31,7 @@ def _role(user: dict) -> str:
 
 
 def _is_exec(user: dict) -> bool:
-    return _role(user) in ("ceo", "coo")
+    return _role(user) in ("ceo", "coo", "admin")
 
 
 async def _get_allowed_dm_partners(db, current_user: dict) -> list:

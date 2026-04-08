@@ -13,6 +13,7 @@ import {
 } from '../store/slices/usersSlice'
 import { fetchProjectsRequest } from '../store/slices/projectsSlice'
 import { fetchTeamsRequest } from '../store/slices/teamsSlice'
+import { setActiveRoom } from '../store/slices/chatSlice'
 import { Modal } from '../components/common/Modal'
 import { Pagination } from '../components/common/Pagination'
 import { UserPickerByRole } from '../components/common/UserPickerByRole'
@@ -199,6 +200,14 @@ export const UsersPage: React.FC = () => {
   const teamsLeadUsers = useMemo(() => teamsAllUsers.filter((u: any) => ['team_lead', 'pm', 'coo', 'ceo'].includes(u.primary_role)), [teamsAllUsers])
   const getTeamUserName = (id: string) => teamsAllUsers.find((u: any) => u.id === id)?.full_name || items.find((u: any) => u.id === id)?.full_name || id
   const getTeamUserDept = (id: string) => teamsAllUsers.find((u: any) => u.id === id)?.department || items.find((u: any) => u.id === id)?.department || ''
+
+  const openDmWithUser = async (userId: string) => {
+    try {
+      const res = await api.post('/chat/rooms', { type: 'direct', participant_ids: [userId] })
+      dispatch(setActiveRoom(res.data.room_id))
+    } catch {}
+    navigate('/chat')
+  }
 
   const viewTabs: Array<{ key: ViewKey; label: string; icon: React.ReactNode }> = [
     { key: 'people', label: 'People', icon: <Users size={13} /> },
@@ -1078,10 +1087,13 @@ export const UsersPage: React.FC = () => {
 
                       <div className="grid grid-cols-3 gap-2 pt-1">
                         {selectedTeam.lead_id && (
-                          <a href="/chat" className="flex flex-col items-center gap-1.5 px-2 py-3 bg-amber-50 text-amber-600 rounded-xl text-xs font-medium hover:bg-amber-100 transition-colors">
+                          <button
+                            onClick={() => openDmWithUser(selectedTeam.lead_id)}
+                            className="flex flex-col items-center gap-1.5 px-2 py-3 bg-amber-50 text-amber-600 rounded-xl text-xs font-medium hover:bg-amber-100 transition-colors"
+                          >
                             <MessageSquare size={14} />
                             Message Lead
-                          </a>
+                          </button>
                         )}
                         {canManageTeam(selectedTeam) && (
                           <>
@@ -2301,9 +2313,26 @@ const UserDetailModal: React.FC<{
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [assigning, setAssigning] = useState(false)
 
+  const dispatch = useDispatch()
   const canManage = ['ceo', 'coo', 'admin', 'pm', 'team_lead'].includes(callerRole)
-
   const isPrivileged = ['ceo', 'coo', 'admin'].includes(callerRole)
+
+  const [dmLoading, setDmLoading] = useState(false)
+
+  const openDm = async () => {
+    setDmLoading(true)
+    try {
+      const res = await api.post('/chat/rooms', { type: 'direct', participant_ids: [user.id] })
+      dispatch(setActiveRoom(res.data.room_id))
+      navigate('/chat')
+      onClose()
+    } catch {
+      navigate('/chat')
+      onClose()
+    } finally {
+      setDmLoading(false)
+    }
+  }
 
   const handleEdit = async () => {
     setSaving(true)
@@ -2436,12 +2465,14 @@ const UserDetailModal: React.FC<{
                   >
                     <Mail size={13} /> Send Email
                   </a>
-                  <a
-                    href="/chat"
-                    className="flex items-center justify-center gap-2 px-3 py-2.5 bg-amber-50 text-amber-600 rounded-xl text-sm font-medium hover:bg-amber-100 transition-colors"
+                  <button
+                    onClick={openDm}
+                    disabled={dmLoading}
+                    className="flex items-center justify-center gap-2 px-3 py-2.5 bg-amber-50 text-amber-600 rounded-xl text-sm font-medium hover:bg-amber-100 transition-colors disabled:opacity-60"
                   >
-                    <MessageSquare size={13} /> Message
-                  </a>
+                    {dmLoading ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
+                    Message
+                  </button>
                 </div>
               )}
 

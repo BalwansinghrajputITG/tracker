@@ -30,7 +30,7 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
       { label: 'Projects',   icon: <FolderKanban size={16} />,    href: '/projects',  roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead', 'employee'] },
       { label: 'Tasks',      icon: <ListChecks size={16} />,      href: '/tasks',     roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead'] },
       { label: 'Reports',    icon: <FileText size={16} />,        href: '/reports',   roles: ['ceo', 'coo', 'pm', 'team_lead', 'employee'] },
-      { label: 'Messages',   icon: <MessageSquare size={16} />,   href: '/chat',      roles: ['ceo', 'coo', 'pm', 'team_lead', 'employee'] },
+      { label: 'Messages',   icon: <MessageSquare size={16} />,   href: '/chat',      roles: ['ceo', 'coo', 'admin', 'pm', 'team_lead', 'employee'] },
     ],
   },
   {
