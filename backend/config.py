@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = "noreply@company.com"
 
+    # Basecamp OAuth
+    BASECAMP_REDIRECT_URI: str = "http://localhost:3000/callback"
+
     # CORS — set via env var as JSON array: '["https://yourapp.vercel.app"]'
     ALLOWED_ORIGINS: list = ["http://localhost:3000"]
 

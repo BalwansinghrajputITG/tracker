@@ -4,6 +4,7 @@ import {
   FileText, Plus, X, CheckCircle2, AlertTriangle, ArrowRight,
   ThumbsUp, Smile, Meh, Frown, ThumbsDown, Loader2, Trash2, Pencil, Save, User,
 } from 'lucide-react'
+import { EmptyState } from '../components/shared/EmptyState'
 import { Modal } from '../components/common/Modal'
 import { Pagination } from '../components/common/Pagination'
 import { RootState } from '../store'
@@ -203,12 +204,20 @@ export const ReportsPage: React.FC = () => {
           {isLoading && items.length === 0 ? (
             [...Array(4)].map((_, i) => <div key={i} className="h-20 skeleton" />)
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-48 text-gray-400 animate-fade-in">
-              <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mb-3">
-                <FileText size={22} className="text-gray-300" />
-              </div>
-              <p className="text-sm font-medium">No reports found</p>
-            </div>
+            <EmptyState
+              variant="reports"
+              title="No reports submitted today"
+              description="Submit your daily report to keep your team in sync and track progress over time."
+              action={
+                <button
+                  onClick={() => setSubmitOpen(true)}
+                  className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-emerald-700 hover:shadow-lg hover:shadow-emerald-200 hover:scale-105 transition-all duration-200"
+                >
+                  <Plus size={15} />
+                  Submit your report
+                </button>
+              }
+            />
           ) : (
             items.map((report, i) => {
               const mood = getMood(report.mood)

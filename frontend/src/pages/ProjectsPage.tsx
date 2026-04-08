@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { navigate } from './AppLayout'
 import { useDispatch, useSelector } from 'react-redux'
-import { FolderOpen, Plus, AlertTriangle, Search } from 'lucide-react'
+import { Plus, AlertTriangle, Search } from 'lucide-react'
+import { EmptyState } from '../components/shared/EmptyState'
 import { RootState } from '../store'
 import { fetchProjectsRequest, createProjectRequest, updateProjectLocal } from '../store/slices/projectsSlice'
 import { fetchUsersRequest } from '../store/slices/usersSlice'
@@ -303,23 +304,39 @@ export const ProjectsPage: React.FC = () => {
           {[...Array(6)].map((_, i) => <div key={i} className="h-44 skeleton" />)}
         </div>
       ) : items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 text-gray-400 animate-fade-in">
-          <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mb-3">
-            <FolderOpen size={22} className="text-gray-300" />
-          </div>
-          <p className="text-sm font-medium">No projects found</p>
-        </div>
+        <EmptyState
+          variant="projects"
+          title="No projects yet"
+          description="Your workspace is all set. Create your first project to get the team moving."
+          action={canCreate ? (
+            <button
+              onClick={() => navigate('/projects/new')}
+              className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200 hover:scale-105 transition-all duration-200"
+            >
+              <Plus size={15} />
+              Create your first project
+            </button>
+          ) : undefined}
+        />
       ) : (() => {
         const displayItems = nameSearch.trim()
           ? items.filter(p => p.name.toLowerCase().includes(nameSearch.trim().toLowerCase()))
           : items
         if (displayItems.length === 0) return (
-          <div className="flex flex-col items-center justify-center h-48 text-gray-400 animate-fade-in">
-            <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center mb-3">
-              <Search size={20} className="text-gray-300" />
-            </div>
-            <p className="text-sm font-medium">No projects match "{nameSearch}"</p>
-          </div>
+          <EmptyState
+            variant="search"
+            title={`No projects match "${nameSearch}"`}
+            description="Try a different name or broaden your search."
+            action={
+              <button
+                onClick={() => setNameSearch('')}
+                className="flex items-center gap-1.5 text-sm text-blue-600 font-medium hover:underline"
+              >
+                <Search size={13} />
+                Clear search
+              </button>
+            }
+          />
         )
         return (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

@@ -4,6 +4,7 @@ import {
   ListChecks, Plus, X, AlertTriangle, Clock, Users,
   LayoutGrid, List, Save, Loader,
 } from 'lucide-react'
+import { EmptyState } from '../components/shared/EmptyState'
 import { Modal } from '../components/common/Modal'
 import { Pagination } from '../components/common/Pagination'
 import { RootState } from '../store'
@@ -304,9 +305,39 @@ export const TasksPage: React.FC = () => {
           {[...Array(4)].map((_, i) => <div key={i} className="flex-1 h-48 skeleton" />)}
         </div>
       ) : view === 'kanban' ? (
+        items.length === 0 ? (
+          <EmptyState
+            variant={filterProject || filterPriority ? 'search' : 'tasks'}
+            title={filterProject || filterPriority ? 'No tasks match your filter' : 'No tasks yet'}
+            description={
+              filterProject || filterPriority
+                ? 'Try broadening your search by removing a filter.'
+                : 'Create your first task to start tracking work across the board.'
+            }
+            action={
+              filterProject || filterPriority ? (
+                <button
+                  onClick={() => { setFilterProject(''); setFilterPriority('') }}
+                  className="text-sm text-blue-600 font-medium hover:underline"
+                >
+                  Clear filters
+                </button>
+              ) : isManager ? (
+                <button
+                  onClick={() => setShowModal(true)}
+                  className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-200 hover:scale-105 transition-all duration-200"
+                >
+                  <Plus size={15} />
+                  New Task
+                </button>
+              ) : undefined
+            }
+          />
+        ) : (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {STATUS_COLS.map((status, ci) => {
             const style = HEADER_COLORS[status]
+            const colTasks = tasksByStatus[status] || []
             return (
               <div key={status} className="flex-shrink-0 w-64 animate-fade-in-up" style={{ animationDelay: `${ci * 0.06}s` }}>
                 <div className={`rounded-xl border px-3 py-2.5 mb-3 flex items-center justify-between ${style.bg}`}>
@@ -315,11 +346,16 @@ export const TasksPage: React.FC = () => {
                     <span className="text-sm font-semibold text-gray-700">{STATUS_LABELS[status]}</span>
                   </div>
                   <span className="text-xs bg-white px-2 py-0.5 rounded-lg text-gray-500 font-semibold">
-                    {tasksByStatus[status]?.length || 0}
+                    {colTasks.length}
                   </span>
                 </div>
                 <div className="space-y-2.5">
-                  {(tasksByStatus[status] || []).map((task, i) => (
+                  {colTasks.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center rounded-xl border border-dashed border-gray-200">
+                      <span className={`w-2 h-2 rounded-full ${style.dot} opacity-30 mb-2`} />
+                      <p className="text-xs text-gray-400">No {STATUS_LABELS[status].toLowerCase()} tasks</p>
+                    </div>
+                  ) : colTasks.map((task, i) => (
                     <KanbanCard
                       key={task.id}
                       task={task}
@@ -332,6 +368,7 @@ export const TasksPage: React.FC = () => {
             )
           })}
         </div>
+        )
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-fade-in-up">
           <table className="w-full text-sm">
@@ -344,7 +381,30 @@ export const TasksPage: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {items.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-12 text-gray-400 text-sm">No tasks found</td></tr>
+                <tr>
+                  <td colSpan={6}>
+                    <EmptyState
+                      variant={filterProject || filterPriority ? 'search' : 'tasks'}
+                      title={filterProject || filterPriority ? 'No tasks match your filter' : 'No tasks yet'}
+                      description={
+                        filterProject || filterPriority
+                          ? 'Try broadening your search by removing a filter.'
+                          : 'Tasks you create will appear here.'
+                      }
+                      size="compact"
+                      action={
+                        filterProject || filterPriority ? (
+                          <button
+                            onClick={() => { setFilterProject(''); setFilterPriority('') }}
+                            className="text-sm text-blue-600 font-medium hover:underline"
+                          >
+                            Clear filters
+                          </button>
+                        ) : undefined
+                      }
+                    />
+                  </td>
+                </tr>
               ) : (
                 items.map((task, i) => (
                   <tr

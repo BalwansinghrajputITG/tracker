@@ -59,8 +59,9 @@ async def security_headers_middleware(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    # Referrer-Policy: strict-origin-when-cross-origin is the browser default (Chrome 85+),
+    # explicitly set here for older browsers and non-browser clients.
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["ngrok-skip-browser-warning"] = "true"
     return response
 
 @app.exception_handler(InvalidId)

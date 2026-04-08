@@ -28,13 +28,14 @@ from datetime import datetime, timezone
 
 from database import get_db
 from middleware.auth import get_current_user
+from config import settings
 
 router = APIRouter()
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 _CLIENT_ID     = "4a389e0b4597fb7c6ea2867f7075bb67b4d92ed4"
 _CLIENT_SECRET = "e1d94048127d28a66c7e4aaaaa3fc8664d9f2c30"
-_REDIRECT_URI  = "http://localhost:3000/callback"
+_REDIRECT_URI  = settings.BASECAMP_REDIRECT_URI
 _AUTH_URL      = "https://launchpad.37signals.com/authorization/new"
 _TOKEN_URL     = "https://launchpad.37signals.com/authorization/token"
 _IDENTITY_URL  = "https://launchpad.37signals.com/authorization.json"
