@@ -6,7 +6,8 @@ import {
   ChevronRight, ChevronDown, Eye,
 } from 'lucide-react'
 import { api } from '../utils/api'
-import { useToast } from '../components/shared'
+import { sanitizeHtml } from '../utils/sanitize'
+import { useToast, ConfirmDialog } from '../components/shared'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -421,7 +422,7 @@ const MessagesTab: React.FC<{ project: BCProject }> = ({ project }) => {
           </button>
           {expandedMsg === msg.id && (
             <div className="border-t border-gray-50 px-4 pb-4 pt-3">
-              {msg.content && <div className="text-sm text-gray-700 mb-3" dangerouslySetInnerHTML={{ __html: msg.content }} />}
+              {msg.content && <div className="text-sm text-gray-700 mb-3" dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }} />}
               <div className="space-y-2">
                 {(msgComments[msg.id] || []).map(c => (
                   <div key={c.id} className="flex gap-2">
@@ -493,7 +494,7 @@ const DocumentsTab: React.FC<{ project: BCProject }> = ({ project }) => {
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <h2 className="text-lg font-bold text-gray-900 mb-1">{viewing.title}</h2>
         <p className="text-xs text-gray-400 mb-4">{viewing.creator?.name} · Updated {fmtDate(viewing.updated_at)}</p>
-        <div className="prose prose-sm max-w-none text-gray-700" dangerouslySetInnerHTML={{ __html: viewing.content || '<em>No content</em>' }} />
+        <div className="prose prose-sm max-w-none text-gray-700" dangerouslySetInnerHTML={{ __html: sanitizeHtml(viewing.content || '<em>No content</em>') }} />
       </div>
     </div>
   )
@@ -879,6 +880,11 @@ export const BasecampPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabKey>('todos')
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
+  const [showNewProject, setShowNewProject] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectDesc, setNewProjectDesc] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
 
   useEffect(() => {
     api.get('/basecamp/status')
@@ -899,20 +905,97 @@ export const BasecampPage: React.FC = () => {
       .finally(() => setProjectsLoading(false))
   }, [selectedProject])
 
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) return
+    setCreatingProject(true)
+    try {
+      const r = await api.post('/basecamp/projects', {
+        name: newProjectName.trim(),
+        description: newProjectDesc.trim(),
+      })
+      const created: BCProject = r.data
+      setProjects(prev => [created, ...prev])
+      setSelectedProject(created)
+      setActiveTab('todos')
+      setNewProjectName('')
+      setNewProjectDesc('')
+      setShowNewProject(false)
+      toast.success(`Project "${created.name}" created!`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to create project')
+    } finally {
+      setCreatingProject(false)
+    }
+  }
+
   const handleConnect = async () => {
     setConnecting(true)
-    try { const r = await api.get('/basecamp/auth/url'); window.location.href = r.data.url }
-    catch { toast.error('Failed to start authorization'); setConnecting(false) }
+    try {
+      const r = await api.get('/basecamp/auth/url')
+
+      // Open OAuth in a popup — user stays on this page the whole time
+      const popup = window.open(
+        r.data.url,
+        'basecamp_oauth',
+        'width=620,height=700,scrollbars=yes,resizable=yes,left=' +
+          Math.round(window.screenX + (window.outerWidth - 620) / 2) +
+          ',top=' +
+          Math.round(window.screenY + (window.outerHeight - 700) / 2),
+      )
+
+      if (!popup) {
+        // Popup blocked — fall back to full redirect
+        window.location.href = r.data.url
+        return
+      }
+
+      // Listen for postMessage from BasecampCallbackPage inside the popup
+      const handler = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return
+        if (event.data?.type !== 'basecamp_oauth') return
+        window.removeEventListener('message', handler)
+        setConnecting(false)
+
+        if (event.data.success) {
+          const newStatus: BCStatus = {
+            connected: true,
+            account_id:   event.data.account_id,
+            account_name: event.data.account_name,
+            identity:     event.data.identity,
+          }
+          setStatus(newStatus)
+          loadProjects()
+          toast.success(`Connected to ${event.data.account_name || 'Basecamp'}!`)
+        } else {
+          toast.error(event.data.error || 'Basecamp authorization failed.')
+        }
+      }
+      window.addEventListener('message', handler)
+
+      // Clean up if the popup is closed manually before completing
+      const pollClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(pollClosed)
+          window.removeEventListener('message', handler)
+          setConnecting(false)
+        }
+      }, 500)
+    } catch {
+      toast.error('Failed to start authorization')
+      setConnecting(false)
+    }
   }
 
   const handleDisconnect = async () => {
-    if (!window.confirm('Disconnect your Basecamp account?')) return
     setDisconnecting(true)
     try {
       await api.delete('/basecamp/disconnect')
       setStatus({ connected: false }); setProjects([]); setSelectedProject(null)
       toast.success('Basecamp disconnected')
-    } catch { toast.error('Failed to disconnect') } finally { setDisconnecting(false) }
+    } catch { toast.error('Failed to disconnect') } finally {
+      setDisconnecting(false)
+      setShowDisconnectConfirm(false)
+    }
   }
 
   if (statusLoading) return <div className="flex items-center justify-center h-64"><Loader2 size={22} className="animate-spin text-green-500" /></div>
@@ -952,9 +1035,9 @@ export const BasecampPage: React.FC = () => {
               className="w-full py-3.5 rounded-2xl text-white font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] disabled:opacity-60 transition-all"
               style={{ background: BC_GREEN }}>
               {connecting ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
-              {connecting ? 'Redirecting to Basecamp…' : 'Connect with Basecamp'}
+              {connecting ? 'Waiting for Basecamp…' : 'Connect with Basecamp'}
             </button>
-            <p className="text-xs text-center text-gray-400 mt-3">You'll be redirected to Basecamp to authorize.</p>
+            <p className="text-xs text-center text-gray-400 mt-3">A popup will open for you to sign in to Basecamp.</p>
           </div>
         </div>
       </div>
@@ -971,6 +1054,17 @@ export const BasecampPage: React.FC = () => {
 
   return (
     <div className="space-y-4 animate-fade-in-up">
+      <ConfirmDialog
+        open={showDisconnectConfirm}
+        onClose={() => setShowDisconnectConfirm(false)}
+        onConfirm={handleDisconnect}
+        title="Disconnect Basecamp?"
+        message="Your Basecamp account will be unlinked. You can reconnect at any time."
+        confirmLabel="Disconnect"
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={disconnecting}
+      />
       {/* Connection banner */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3 flex items-center gap-3">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: BC_GREEN }}>
@@ -987,7 +1081,7 @@ export const BasecampPage: React.FC = () => {
           <button onClick={loadProjects} title="Refresh" className="w-8 h-8 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
             <RefreshCw size={13} className={projectsLoading ? 'animate-spin' : ''} />
           </button>
-          <button onClick={handleDisconnect} disabled={disconnecting}
+          <button onClick={() => setShowDisconnectConfirm(true)} disabled={disconnecting}
             className="flex items-center gap-1 text-xs text-red-500 hover:text-red-600 font-semibold px-2.5 py-1.5 rounded-xl hover:bg-red-50 transition-all disabled:opacity-40">
             <LogOut size={12} /> Disconnect
           </button>
@@ -999,8 +1093,52 @@ export const BasecampPage: React.FC = () => {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between shrink-0">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Projects</h3>
-            <span className="text-xs text-gray-400">{projects.length}</span>
+            <button
+              onClick={() => setShowNewProject(v => !v)}
+              className="w-6 h-6 flex items-center justify-center rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-all"
+              title="New project"
+            >
+              <Plus size={14} />
+            </button>
           </div>
+
+          {/* New project inline form */}
+          {showNewProject && (
+            <div className="px-3 py-3 border-b border-gray-50 bg-green-50/60 space-y-2">
+              <input
+                autoFocus
+                value={newProjectName}
+                onChange={e => setNewProjectName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleCreateProject(); if (e.key === 'Escape') setShowNewProject(false) }}
+                placeholder="Project name *"
+                className="w-full text-xs rounded-xl border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white"
+              />
+              <input
+                value={newProjectDesc}
+                onChange={e => setNewProjectDesc(e.target.value)}
+                placeholder="Description (optional)"
+                className="w-full text-xs rounded-xl border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-white"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCreateProject}
+                  disabled={!newProjectName.trim() || creatingProject}
+                  className="flex-1 py-1.5 rounded-xl text-xs font-bold text-white disabled:opacity-50 flex items-center justify-center gap-1 transition-all hover:opacity-90"
+                  style={{ background: BC_GREEN }}
+                >
+                  {creatingProject ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                  {creatingProject ? 'Creating…' : 'Create'}
+                </button>
+                <button
+                  onClick={() => { setShowNewProject(false); setNewProjectName(''); setNewProjectDesc('') }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 transition-all"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {projectsLoading
             ? <div className="flex justify-center py-8"><Loader2 size={16} className="animate-spin text-green-500" /></div>
             : projects.length === 0

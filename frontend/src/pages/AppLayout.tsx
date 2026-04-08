@@ -2,13 +2,17 @@ import React, { useState, useEffect, Suspense, lazy } from 'react'
 import { useSelector } from 'react-redux'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ErrorBoundary } from 'react-error-boundary'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Bell, BellOff } from 'lucide-react'
 import { RootState } from '../store'
 import { ANALYTICS_ROLES } from '../constants/roles'
 import { Sidebar } from '../components/common/Sidebar'
 import { NotificationBell } from '../components/common/NotificationBell'
 import { CursorEffect } from '../components/common/CursorEffect'
 import { PageErrorFallback } from '../components/common/ErrorFallback'
+import {
+  hasBeenPrompted, markPrompted,
+  requestBrowserPermission, getBrowserPref,
+} from '../utils/notifications'
 
 const Chatbot = lazy(() => import('../components/chatbot/Chatbot').then(m => ({ default: m.Chatbot })))
 
@@ -63,6 +67,28 @@ export const AppLayout: React.FC = () => {
   const role = user?.primary_role || 'employee'
   const pageMeta = resolvePageMeta(currentPath)
   const [contentKey, setContentKey] = useState(0)
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false)
+
+  // Ask for notification permission once on first login
+  useEffect(() => {
+    if (!('Notification' in window)) return
+    if (hasBeenPrompted()) return
+    if (Notification.permission !== 'default') { markPrompted(); return }
+    // Small delay so the page settles before the banner pops in
+    const t = setTimeout(() => setShowNotifPrompt(true), 1500)
+    return () => clearTimeout(t)
+  }, [])
+
+  const handleAllowNotifications = async () => {
+    markPrompted()
+    setShowNotifPrompt(false)
+    await requestBrowserPermission()
+  }
+
+  const handleDismissNotifPrompt = () => {
+    markPrompted()
+    setShowNotifPrompt(false)
+  }
 
   useEffect(() => {
     const html = document.documentElement
@@ -147,6 +173,41 @@ export const AppLayout: React.FC = () => {
           <Chatbot />
         </Suspense>
       )}
+
+      {/* First-login notification permission banner */}
+      {showNotifPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm animate-fade-in">
+        <div className="w-full max-w-sm animate-fade-in-up">
+          <div className="bg-white border border-gray-200 rounded-2xl shadow-2xl p-4 flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0 mt-0.5">
+              <Bell size={16} className="text-blue-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900">Enable notifications?</p>
+              <p className="text-xs text-gray-500 mt-0.5">Get notified about tasks, reports, and messages.</p>
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={handleAllowNotifications}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors"
+                >
+                  Allow
+                </button>
+                <button
+                  onClick={handleDismissNotifPrompt}
+                  className="px-3.5 py-1.5 text-gray-500 hover:text-gray-700 text-xs font-semibold rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+            <button onClick={handleDismissNotifPrompt} className="text-gray-300 hover:text-gray-500 transition-colors mt-0.5">
+              <RefreshCw size={12} className="rotate-45" />
+            </button>
+          </div>
+        </div>
+        </div>
+      )}
+
       <CursorEffect />
     </div>
   )

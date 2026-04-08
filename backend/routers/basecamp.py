@@ -193,6 +193,29 @@ async def list_projects(current_user=Depends(get_current_user), db=Depends(get_d
     return {"projects": data if isinstance(data, list) else []}
 
 
+class ProjectCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+
+
+@router.post("/projects", status_code=201)
+async def create_project(
+    body: ProjectCreate,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    doc = await _get_token_doc(current_user, db)
+    payload: dict = {"name": body.name.strip()}
+    if body.description:
+        payload["description"] = body.description.strip()
+    data = await _bc_post(
+        f"{_API_BASE}/{doc['account_id']}/projects.json",
+        doc["access_token"],
+        payload,
+    )
+    return data
+
+
 @router.get("/projects/{project_id}")
 async def get_project(
     project_id: int,
@@ -216,9 +239,13 @@ async def list_todo_lists(
     db=Depends(get_db),
 ):
     doc = await _get_token_doc(current_user, db)
+    token = doc["access_token"]
+    todoset = await _get_dock_tool(project_id, "todoset", token, doc["account_id"])
+    if not todoset:
+        return {"todolists": []}
     data = await _bc_get(
-        f"{_API_BASE}/{doc['account_id']}/buckets/{project_id}/todolists.json",
-        doc["access_token"],
+        f"{_API_BASE}/{doc['account_id']}/buckets/{project_id}/todosets/{todoset['id']}/todolists.json",
+        token,
     )
     return {"todolists": data if isinstance(data, list) else []}
 

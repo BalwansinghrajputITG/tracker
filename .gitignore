@@ -4,3 +4,8 @@ node_modules/
 dist/
 .env
 *.log
+build/
+*.egg-info/
+backend/__pycache__/
+backend/migrations/
+nul

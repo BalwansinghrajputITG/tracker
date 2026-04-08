@@ -21,6 +21,13 @@ router = APIRouter()
 
 EXEC_ROLES = {"ceo", "coo"}
 
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+
+def _sanitize_message(text: str) -> str:
+    """Strip HTML tags and limit length. Chatbot messages are plain text — no markup is valid."""
+    stripped = _HTML_TAG_RE.sub('', text)
+    return stripped[:4000]
+
 # Commands that perform write operations
 ACTION_COMMANDS = {
     "create-team", "add-member", "remove-member", "create-project",
@@ -55,7 +62,7 @@ async def chatbot_message(
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    user_message = body.message.strip()
+    user_message = _sanitize_message(body.message.strip())
     session_id = body.session_id or str(uuid.uuid4())
     role = current_user.get("primary_role", "manager")
 
@@ -271,7 +278,7 @@ async def chatbot_stream(
       data: {"done": true, ...metadata}\n\n — final event with session_id etc.
       data: {"error": "..."}\n\n          — only on failure
     """
-    user_message = body.message.strip()
+    user_message = _sanitize_message(body.message.strip())
     session_id = body.session_id or str(uuid.uuid4())
     role = current_user.get("primary_role", "manager")
 
@@ -593,11 +600,10 @@ async def _route_action(executor: ActionExecutor, cmd: str, raw_arg: str, all_ar
         return await executor.assign_task(task_title=task_title, user_name=user_name)
 
     if cmd == "create-user":
-        # /create-user <name> <email> <password> <department> <role>
+        # /create-user <name> <email> <department> <role>  (no password — generated server-side)
         # Support both --flag style and positional args
         name_m  = re.search(r"--name\s+(.*?)(?=\s+--|$)", raw_arg)
         email_m = re.search(r"--email\s+(\S+)", raw_arg)
-        pass_m  = re.search(r"--password\s+(\S+)", raw_arg)
         dept_m  = re.search(r"--dept\s+(.*?)(?=\s+--|$)", raw_arg)
         role_m  = re.search(r"--role\s+(\S+)", raw_arg)
 
@@ -605,38 +611,35 @@ async def _route_action(executor: ActionExecutor, cmd: str, raw_arg: str, all_ar
             # Flag-based parsing
             full_name  = name_m.group(1).strip()  if name_m  else ""
             email      = email_m.group(1).strip() if email_m else ""
-            password   = pass_m.group(1).strip()  if pass_m  else "changeme123"
             department = dept_m.group(1).strip()  if dept_m  else ""
             role_name  = role_m.group(1).strip()  if role_m  else "employee"
         else:
-            # Positional: try to detect email in tokens and split around it
+            # Positional: <name...> <email> <department> <role>
             email_idx = next((i for i, t in enumerate(tokens) if "@" in t), -1)
             if email_idx > 0:
                 full_name  = " ".join(tokens[:email_idx])
                 email      = tokens[email_idx]
-                password   = tokens[email_idx + 1] if email_idx + 1 < len(tokens) else "changeme123"
-                department = tokens[email_idx + 2] if email_idx + 2 < len(tokens) else ""
-                role_name  = tokens[email_idx + 3] if email_idx + 3 < len(tokens) else "employee"
+                department = tokens[email_idx + 1] if email_idx + 1 < len(tokens) else ""
+                role_name  = tokens[email_idx + 2] if email_idx + 2 < len(tokens) else "employee"
             elif len(tokens) >= 2:
                 full_name  = tokens[0]
                 email      = tokens[1]
-                password   = tokens[2] if len(tokens) > 2 else "changeme123"
-                department = tokens[3] if len(tokens) > 3 else ""
-                role_name  = tokens[4] if len(tokens) > 4 else "employee"
+                department = tokens[2] if len(tokens) > 2 else ""
+                role_name  = tokens[3] if len(tokens) > 3 else "employee"
             else:
                 return {
                     "success": False,
                     "message": (
-                        "Please provide all required details:\n"
+                        "Please provide the required details:\n"
                         "**Option 1 (flags):** `/create-user --name \"John Smith\" --email john@company.com --role employee --dept Engineering`\n"
-                        "**Option 2 (positional):** `/create-user \"John Smith\" john@company.com secret123 Engineering employee`"
+                        "**Option 2 (positional):** `/create-user \"John Smith\" john@company.com Engineering employee`\n"
+                        "A secure temporary password will be generated automatically."
                     ),
                     "data": {},
                 }
         return await executor.create_user_action(
             full_name=full_name,
             email=email,
-            password=password,
             department=department,
             role_name=role_name,
         )
@@ -896,30 +899,34 @@ async def monitor_list_users(
             "session_count": {"$sum": 1},
             "last_active": {"$max": "$updated_at"},
         }},
+        # Exclude the caller's own sessions
+        {"$match": {"_id": {"$ne": current_user["_id"]}}},
         {"$sort": {"last_active": -1}},
         {"$limit": 100},
+        {"$lookup": {
+            "from": "users",
+            "localField": "_id",
+            "foreignField": "_id",
+            "as": "user_doc",
+            "pipeline": [{"$project": {"full_name": 1, "department": 1, "primary_role": 1}}],
+        }},
+        # Drop rows where the user no longer exists
+        {"$match": {"user_doc": {"$ne": []}}},
+        {"$set": {"user_doc": {"$arrayElemAt": ["$user_doc", 0]}}},
     ]
     rows = await db.chatbot_sessions.aggregate(pipeline).to_list(100)
 
-    users = []
-    for row in rows:
-        uid = row["_id"]
-        # Skip the caller themselves (they see their own chat normally)
-        if uid == current_user["_id"]:
-            continue
-        user = await db.users.find_one({"_id": uid}, {
-            "full_name": 1, "department": 1, "primary_role": 1,
-        })
-        if not user:
-            continue
-        users.append({
-            "user_id": str(uid),
-            "full_name": user.get("full_name", "Unknown"),
-            "department": user.get("department", ""),
-            "role": user.get("primary_role", ""),
+    users = [
+        {
+            "user_id": str(row["_id"]),
+            "full_name": row["user_doc"].get("full_name", "Unknown"),
+            "department": row["user_doc"].get("department", ""),
+            "role": row["user_doc"].get("primary_role", ""),
             "session_count": row["session_count"],
             "last_active": row["last_active"].isoformat() if row.get("last_active") else None,
-        })
+        }
+        for row in rows
+    ]
 
     return {"users": users}
 

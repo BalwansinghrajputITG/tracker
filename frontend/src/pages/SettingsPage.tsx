@@ -4,7 +4,7 @@ import {
   User, Lock, Shield, LogOut, Save, Eye, EyeOff,
   CheckCircle2, AlertCircle, Loader2, ChevronRight,
   Palette, Bot, Move, LockKeyhole, LockKeyholeOpen, RotateCcw, MapPin,
-  Sun, Moon, Sparkles, Monitor, MousePointer2,
+  Sun, Moon, Sparkles, Monitor, MousePointer2, Bell,
 } from 'lucide-react'
 import { RootState } from '../store'
 import { logout } from '../store/slices/authSlice'
@@ -13,12 +13,16 @@ import { CHATBOT_POS_KEY, CHATBOT_LOCK_KEY } from '../components/chatbot/Chatbot
 import { setThemeMode, setCursorStyle, ThemeMode, CursorStyle } from '../store/slices/themeSlice'
 import { ROLE_LABELS, ROLE_AVATAR_GRADIENT, ROLE_BADGE_SIMPLE } from '../constants/roles'
 import { useToast } from '../components/shared'
+import {
+  getBrowserPref, getInAppPref, setInAppPref,
+  requestBrowserPermission, markPrompted,
+} from '../utils/notifications'
 
 // Aliases for local readability
 const ROLE_COLORS = ROLE_AVATAR_GRADIENT
 const ROLE_BADGE  = ROLE_BADGE_SIMPLE
 
-type TabKey = 'profile' | 'password' | 'account' | 'appearance'
+type TabKey = 'profile' | 'password' | 'account' | 'appearance' | 'notifications'
 
 export const SettingsPage: React.FC = () => {
   const dispatch = useDispatch()
@@ -35,6 +39,27 @@ export const SettingsPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
+
+  // ── Notification preferences ─────────────────────────────────
+  const [browserPerm, setBrowserPerm] = useState<NotificationPermission>(() => {
+    if (!('Notification' in window)) return 'denied'
+    return Notification.permission
+  })
+  const [inAppEnabled, setInAppEnabled] = useState(() => getInAppPref())
+
+  const handleRequestBrowser = async () => {
+    markPrompted()
+    const result = await requestBrowserPermission()
+    setBrowserPerm(result)
+    if (result === 'granted') toast.success('Browser notifications enabled')
+    else if (result === 'denied') toast.error('Browser notifications blocked — check your browser settings')
+  }
+
+  const handleToggleInApp = (enabled: boolean) => {
+    setInAppPref(enabled)
+    setInAppEnabled(enabled)
+    toast.success(enabled ? 'In-app notifications enabled' : 'In-app notifications disabled')
+  }
 
   // ── Appearance / chatbot position ────────────────────────────
   const [posLocked, setPosLocked] = useState(
@@ -118,10 +143,11 @@ export const SettingsPage: React.FC = () => {
   }
 
   const tabs: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
-    { key: 'profile',    label: 'Profile',    icon: <User size={15} />    },
-    { key: 'password',   label: 'Password',   icon: <Lock size={15} />    },
-    { key: 'account',    label: 'Account',    icon: <Shield size={15} />  },
-    { key: 'appearance', label: 'Appearance', icon: <Palette size={15} /> },
+    { key: 'profile',       label: 'Profile',       icon: <User size={15} />    },
+    { key: 'password',      label: 'Password',      icon: <Lock size={15} />    },
+    { key: 'account',       label: 'Account',       icon: <Shield size={15} />  },
+    { key: 'appearance',    label: 'Appearance',    icon: <Palette size={15} /> },
+    { key: 'notifications', label: 'Notifications', icon: <Bell size={15} />    },
   ]
 
   return (
@@ -629,6 +655,90 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Notifications Tab */}
+      {tab === 'notifications' && (
+        <div className="space-y-4 animate-fade-in">
+
+          {/* Browser notifications */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-blue-50 rounded-xl flex items-center justify-center">
+                <Bell size={15} className="text-blue-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-800">Browser Notifications</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Native OS alerts even when this tab is in the background</p>
+              </div>
+            </div>
+
+            {!('Notification' in window) ? (
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+                <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                <p className="text-xs text-amber-700">Your browser does not support notifications.</p>
+              </div>
+            ) : browserPerm === 'denied' ? (
+              <div className="flex items-start gap-3 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-red-700">Notifications are blocked</p>
+                  <p className="text-xs text-red-600 mt-0.5">
+                    Your browser has blocked notifications for this site. To enable them, click the lock icon in your browser's address bar and allow notifications, then reload the page.
+                  </p>
+                </div>
+              </div>
+            ) : browserPerm === 'granted' ? (
+              <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+                <p className="text-xs text-emerald-700 font-medium">Browser notifications are enabled.</p>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-600">Permission not yet granted</p>
+                <button
+                  onClick={handleRequestBrowser}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors"
+                >
+                  Enable
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* In-app notifications */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-indigo-50 rounded-xl flex items-center justify-center">
+                <Bell size={15} className="text-indigo-600" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-800">In-App Notifications</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Alerts shown in the notification bell inside the app</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Show in-app notifications</p>
+                <p className="text-xs text-gray-400 mt-0.5">Tasks, reports, messages and system alerts</p>
+              </div>
+              <button
+                onClick={() => handleToggleInApp(!inAppEnabled)}
+                className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${inAppEnabled ? 'bg-indigo-500' : 'bg-gray-200'}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${inAppEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+
+            {!inAppEnabled && (
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+                <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                <p className="text-xs text-amber-700">In-app notifications are off. You may miss important updates.</p>
+              </div>
+            )}
           </div>
         </div>
       )}

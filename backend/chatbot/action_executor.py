@@ -7,6 +7,8 @@ Permissions are enforced inside each method before any DB write.
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 import re
+import secrets
+import string
 
 from passlib.context import CryptContext
 from utils.team_scope import get_team_project_ids, get_team_member_ids
@@ -550,7 +552,6 @@ class ActionExecutor:
         self,
         full_name: str,
         email: str,
-        password: str,
         department: str,
         role_name: str,
     ) -> dict:
@@ -566,24 +567,29 @@ class ActionExecutor:
                 f"You can create: {', '.join(sorted(allowed_roles)) if allowed_roles else 'none'}."
             )
 
-        if not email or not full_name or not password:
-            return _err("full_name, email, and password are all required.")
+        if not email or not full_name:
+            return _err("full_name and email are required.")
 
         existing = await self.db.users.find_one({"email": email.lower().strip()})
         if existing:
             return _err(f"A user with email '{email}' already exists.")
 
-        hashed = pwd_context.hash(password)
+        # Generate a cryptographically random temporary password (16 chars, mixed)
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        temp_password = "".join(secrets.choice(alphabet) for _ in range(16))
+
+        hashed = pwd_context.hash(temp_password)
         now = datetime.now(timezone.utc)
         doc = {
             "full_name": full_name.strip(),
             "email": email.lower().strip(),
-            "hashed_password": hashed,
+            "password_hash": hashed,
             "department": department.strip(),
             "roles": [role_name],
             "primary_role": role_name,
             "team_ids": [],
             "is_active": True,
+            "must_change_password": True,
             "created_by": self.user["_id"],
             "created_at": now,
             "updated_at": now,
@@ -593,12 +599,14 @@ class ActionExecutor:
         user_id = result.inserted_id
 
         return _ok(
-            f"User '{full_name}' created with role '{role_name}'.",
+            f"User '{full_name}' created with role '{role_name}'. "
+            f"Share this temporary password with them — they must change it on first login: `{temp_password}`",
             user_id=str(user_id),
             full_name=full_name.strip(),
             email=email.lower().strip(),
             role=role_name,
             department=department.strip(),
+            temp_password=temp_password,
         )
 
     async def mark_blocked(

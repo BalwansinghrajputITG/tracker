@@ -12,6 +12,7 @@ import {
   sendMessageRequest, fetchContactsRequest, ChatContact, ChatRoom,
 } from '../../store/slices/chatSlice'
 import { api } from '../../utils/api'
+import { sanitizeMarkdownHtml } from '../../utils/sanitize'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -272,7 +273,9 @@ export const ChatPanel: React.FC = () => {
     }, 0)
   }
 
-  // Render message content: convert **bold**, *italic*, __underline__, newlines → HTML
+  // Render message content: convert **bold**, *italic*, __underline__, newlines → HTML.
+  // HTML-escape the raw input first so user-supplied tags can never inject markup,
+  // then apply markdown substitutions, then run DOMPurify as a final safety net.
   const renderMsgContent = (content: string) => {
     const escaped = content
       .replace(/&/g, '&amp;')
@@ -283,7 +286,7 @@ export const ChatPanel: React.FC = () => {
       .replace(/\*(.+?)\*/g,     '<em>$1</em>')
       .replace(/__(.+?)__/g,     '<u>$1</u>')
       .replace(/\n/g,             '<br>')
-    return <span dangerouslySetInnerHTML={{ __html: html }} />
+    return <span dangerouslySetInnerHTML={{ __html: sanitizeMarkdownHtml(html) }} />
   }
 
   const handleOpenDm = async (contact: ChatContact) => {
