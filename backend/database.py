@@ -52,9 +52,24 @@ class RedisClient:
     client: Redis = None
 
     async def connect(self):
-        self.client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
-        await self.client.ping()
-        logger.info("Redis connected")
+        """Connect to Redis, leaving self.client as None if unreachable.
+
+        Redis backs caching, rate limiting and pub/sub — all of which degrade
+        gracefully (utils.cache short-circuits on a None client, the rate limiter
+        fails open). Raising here instead would abort the FastAPI lifespan and
+        take down every worker, so a cache outage must not block startup.
+        /health still reports redis separately and returns 503 when it is down.
+        """
+        try:
+            client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+            await client.ping()
+            self.client = client
+            logger.info("Redis connected")
+        except Exception as exc:
+            self.client = None
+            logger.error(
+                "Redis unavailable - starting without cache/rate-limiting/pub-sub: %s", exc
+            )
 
     async def disconnect(self):
         if self.client:

@@ -102,14 +102,23 @@ async def health_check():
         checks["mongodb"] = f"error: {exc}"
         overall = "degraded"
 
-    # Redis ping
-    try:
-        await redis_client.client.ping()
-        checks["redis"] = "ok"
-    except Exception as exc:
-        checks["redis"] = f"error: {exc}"
-        overall = "degraded"
+    # Redis ping — optional dependency, reported but never fatal
+    if redis_client.client is None:
+        checks["redis"] = "unavailable"
+        if overall == "ok":
+            overall = "degraded"
+    else:
+        try:
+            await redis_client.client.ping()
+            checks["redis"] = "ok"
+        except Exception as exc:
+            checks["redis"] = f"error: {exc}"
+            if overall == "ok":
+                overall = "degraded"
 
     checks["status"] = overall
-    status_code = 200 if overall == "ok" else 503
+    # Only MongoDB is required to serve traffic. Returning 503 while Redis alone is
+    # down would make platform health checks (Render, compose service_healthy) kill
+    # or gate a service that is still fully able to answer requests.
+    status_code = 503 if checks["mongodb"] != "ok" else 200
     return JSONResponse(content=checks, status_code=status_code)

@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   X, Mail, Phone, Building2, Shield, Loader2, AlertTriangle,
-  CheckCircle2, Plus, Eye, EyeOff, UserCheck,
+  CheckCircle2, Plus, Eye, EyeOff, UserCheck, Camera, Upload,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import {
   createUserRequest, clearCreateError,
 } from '../../store/slices/usersSlice'
 import { Modal } from '../common/Modal'
+import { api } from '../../utils/api'
 import {
   ASSIGNABLE_ROLES,
   ROLE_AVATAR_GRADIENT as AVATAR_COLORS,
@@ -21,6 +22,7 @@ const emptyForm = {
   department: '',
   roles: ['employee'] as string[],
   phone: '',
+  avatar_url: '',
 }
 
 interface DeptObj {
@@ -44,6 +46,11 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
 
   const [form, setForm] = useState(emptyForm)
   const [showPassword, setShowPassword] = useState(false)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState('')
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState('')
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   const assignableRoles = ASSIGNABLE_ROLES[callerRole] || []
 
@@ -56,8 +63,40 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
     }))
   }
 
-  const handleCreate = () => {
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarError('')
+    // Revoke previous blob URL to free memory
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview)
+    setAvatarFile(file)
+    setAvatarPreview(URL.createObjectURL(file))
+  }
+
+  const handleCreate = async () => {
     if (!form.full_name || !form.email || !form.password || !form.department) return
+
+    let avatarUrl = ''
+    if (avatarFile) {
+      setAvatarUploading(true)
+      setAvatarError('')
+      try {
+        const fd = new FormData()
+        fd.append('file', avatarFile)
+        const res = await api.post('/users/upload-avatar', fd)
+        avatarUrl = res.data.avatar_url
+        // Revoke blob URL now that we have the real Cloudinary URL
+        URL.revokeObjectURL(avatarPreview)
+      } catch (err: any) {
+        const msg = err?.response?.data?.detail || 'Image upload failed. Please try again.'
+        setAvatarError(msg)
+        setAvatarUploading(false)
+        return   // Stop — don't create the user if they explicitly chose a photo that failed
+      } finally {
+        setAvatarUploading(false)
+      }
+    }
+
     dispatch(createUserRequest({
       full_name: form.full_name,
       email: form.email,
@@ -65,12 +104,16 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
       department: form.department,
       roles: form.roles,
       phone: form.phone || undefined,
+      avatar_url: avatarUrl || undefined,
     }))
   }
 
   const handleClose = () => {
     setForm(emptyForm)
     setShowPassword(false)
+    setAvatarFile(null)
+    setAvatarPreview('')
+    setAvatarError('')
     dispatch(clearCreateError())
     onClose()
   }
@@ -81,6 +124,9 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
       const name = form.full_name
       setForm(emptyForm)
       setShowPassword(false)
+      setAvatarFile(null)
+      setAvatarPreview('')
+      setAvatarError('')
       onSuccess(name)
     }
     prevLoading.current = createLoading
@@ -107,6 +153,43 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
         </div>
 
         <div className="p-6 space-y-4">
+          {/* Avatar picker */}
+          <div className="flex flex-col items-center gap-2">
+            <div className="relative">
+              <div
+                className="w-20 h-20 rounded-2xl overflow-hidden bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:border-blue-400 transition-colors"
+                onClick={() => avatarInputRef.current?.click()}
+              >
+                {avatarPreview ? (
+                  <img
+                    src={avatarPreview}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                    onError={() => { setAvatarPreview(''); setAvatarFile(null) }}
+                  />
+                ) : (
+                  <Camera size={24} className="text-gray-300" />
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                className="absolute -bottom-1.5 -right-1.5 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center shadow-md hover:bg-blue-700 transition-colors"
+              >
+                <Upload size={11} className="text-white" />
+              </button>
+            </div>
+            <span className="text-xs text-gray-400">Profile photo (optional)</span>
+            {avatarError && <p className="text-xs text-amber-600">{avatarError}</p>}
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleAvatarChange}
+            />
+          </div>
+
           {createError && (
             <div className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-700 text-sm px-3 py-2.5 rounded-xl">
               <AlertTriangle size={13} className="shrink-0" />
@@ -221,10 +304,12 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
           <button onClick={handleClose} className="px-5 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
           <button
             onClick={handleCreate}
-            disabled={!form.full_name || !form.email || !form.password || !form.department || form.roles.length === 0 || createLoading}
+            disabled={!form.full_name || !form.email || !form.password || !form.department || form.roles.length === 0 || createLoading || avatarUploading}
             className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-all"
           >
-            {createLoading
+            {avatarUploading
+              ? <><Loader2 size={13} className="animate-spin" /> Uploading photo…</>
+              : createLoading
               ? <><Loader2 size={13} className="animate-spin" /> Creating…</>
               : <><Plus size={13} /> Create User</>}
           </button>

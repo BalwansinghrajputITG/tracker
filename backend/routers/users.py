@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 from datetime import datetime, timezone
 from typing import Optional
 import hashlib
 import re
+import cloudinary
+import cloudinary.uploader
 from passlib.context import CryptContext
 
+from config import settings
 from database import get_db
 from middleware.auth import get_current_user
 from middleware.rbac import require_ceo_coo, require_manager, require_user_manager
@@ -17,6 +20,13 @@ from utils.team_scope import (
     assert_user_access,
 )
 from utils.token_encrypt import decrypt_token
+
+cloudinary.config(
+    cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+    api_key=settings.CLOUDINARY_API_KEY,
+    api_secret=settings.CLOUDINARY_API_SECRET,
+    secure=True,
+)
 
 router = APIRouter()
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -56,12 +66,14 @@ class UserCreate(BaseModel):
     department: str
     roles: list[str] = ["employee"]
     phone: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
     department: Optional[str] = None
+    avatar_url: Optional[str] = None
     notification_preferences: Optional[dict] = None
     # Admin / exec-only fields
     email: Optional[str] = None
@@ -73,6 +85,41 @@ class UserUpdate(BaseModel):
 @router.get("/me")
 async def get_me(current_user=Depends(get_current_user)):
     return serialize(dict(current_user))
+
+
+@router.post("/upload-avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    """Upload a profile image to Cloudinary and return the secure URL."""
+    import asyncio
+
+    if file.content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, or GIF images are allowed.")
+
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image must be smaller than 5 MB.")
+
+    public_id = f"avatars/user_{current_user['_id']}"
+
+    try:
+        # cloudinary.uploader.upload is synchronous — run in a thread to avoid
+        # blocking the async event loop.
+        result = await asyncio.to_thread(
+            cloudinary.uploader.upload,
+            contents,
+            public_id=public_id,
+            overwrite=True,
+            transformation=[
+                {"width": 400, "height": 400, "crop": "fill", "gravity": "face"},
+                {"quality": "auto", "fetch_format": "auto"},
+            ],
+        )
+        return {"avatar_url": result["secure_url"]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
 
 
 @router.get("")
@@ -158,6 +205,7 @@ async def create_user(
         "phone": body.phone or "",
         "roles": body.roles,
         "primary_role": body.roles[0] if body.roles else "employee",
+        "avatar_url": body.avatar_url or "",
         "team_ids": [],
         "project_ids": [],
         "manager_id": current_user["_id"],

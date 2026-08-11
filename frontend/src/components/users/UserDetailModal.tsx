@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   X, Mail, Phone, Building2, Shield, Loader2, AlertTriangle,
-  CheckCircle2, Pencil, Trash2, MessageSquare, FolderOpen,
+  CheckCircle2, Pencil, Trash2, MessageSquare, FolderOpen, Camera, Upload,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import { User } from '../../store/slices/usersSlice'
@@ -45,11 +45,26 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [assigning, setAssigning] = useState(false)
   const [dmLoading, setDmLoading] = useState(false)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState(user.avatar_url || '')
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState('')
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   const dispatch = useDispatch()
   const toast = useToast()
   const canManage = MANAGER_ROLES.includes(callerRole as any)
   const isPrivileged = EXEC_ROLES.includes(callerRole as any)
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarError('')
+    // Revoke previous blob URL if it was a local preview (not a Cloudinary URL)
+    if (avatarPreview && avatarPreview.startsWith('blob:')) URL.revokeObjectURL(avatarPreview)
+    setAvatarFile(file)
+    setAvatarPreview(URL.createObjectURL(file))
+  }
 
   const openDm = async () => {
     setDmLoading(true)
@@ -76,6 +91,28 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
         department: editForm.department,
         phone: editForm.phone,
       }
+
+      if (avatarFile) {
+        setAvatarUploading(true)
+        try {
+          const fd = new FormData()
+          fd.append('file', avatarFile)
+          const res = await api.post('/users/upload-avatar', fd)
+          payload.avatar_url = res.data.avatar_url
+          // Revoke the local blob URL — we now have the real Cloudinary URL
+          if (avatarPreview.startsWith('blob:')) URL.revokeObjectURL(avatarPreview)
+          setAvatarPreview(payload.avatar_url)
+        } catch (err: any) {
+          const msg = err?.response?.data?.detail || 'Image upload failed. Please try again.'
+          setAvatarError(msg)
+          setAvatarUploading(false)
+          setSaving(false)
+          return  // Stop — show the error, don't save anything
+        } finally {
+          setAvatarUploading(false)
+        }
+      }
+
       if (isPrivileged) {
         if (editForm.email) payload.email = editForm.email
         if (editForm.roles) {
@@ -86,6 +123,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
       }
       await api.put(`/users/${user.id}`, payload)
       toast.success('User updated')
+      setAvatarFile(null)
       onUpdated()
     } catch (err: any) {
       const msg = err?.response?.data?.detail || 'Failed to update user'
@@ -134,8 +172,16 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
         {/* Header */}
         <div className="p-6 border-b border-gray-100 flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${AVATAR_COLORS[role as keyof typeof AVATAR_COLORS] || AVATAR_COLORS.employee} flex items-center justify-center text-white font-bold text-lg shadow-sm`}>
-              {user.full_name?.[0]?.toUpperCase()}
+            <div className={`w-12 h-12 rounded-2xl overflow-hidden bg-gradient-to-br ${AVATAR_COLORS[role as keyof typeof AVATAR_COLORS] || AVATAR_COLORS.employee} flex items-center justify-center text-white font-bold text-lg shadow-sm shrink-0`}>
+              {avatarPreview
+                ? <img
+                    src={avatarPreview}
+                    alt={user.full_name}
+                    className="w-full h-full object-cover"
+                    onError={() => setAvatarPreview('')}
+                  />
+                : user.full_name?.[0]?.toUpperCase()
+              }
             </div>
             <div>
               <h2 className="text-base font-semibold text-gray-800">{user.full_name}</h2>
@@ -233,6 +279,46 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
           {mode === 'edit' && (
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-gray-700">Edit Profile</h3>
+
+              {/* Avatar picker */}
+              <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl">
+                <div className="relative shrink-0">
+                  <div
+                    className="w-16 h-16 rounded-xl overflow-hidden bg-gray-200 flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={() => avatarInputRef.current?.click()}
+                  >
+                    {avatarPreview
+                      ? <img
+                          src={avatarPreview}
+                          alt="Preview"
+                          className="w-full h-full object-cover"
+                          onError={() => { setAvatarPreview(''); setAvatarFile(null) }}
+                        />
+                      : <Camera size={20} className="text-gray-400" />
+                    }
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center shadow hover:bg-blue-700 transition-colors"
+                  >
+                    <Upload size={9} className="text-white" />
+                  </button>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-700">Profile Photo</p>
+                  <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG or WebP · max 5 MB</p>
+                  {avatarError && <p className="text-xs text-amber-600 mt-0.5">{avatarError}</p>}
+                </div>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleAvatarChange}
+                />
+              </div>
+
               {[
                 { label: 'Full Name', key: 'full_name', placeholder: 'Full name' },
                 { label: 'Department', key: 'department', placeholder: 'Department' },
@@ -276,14 +362,18 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                 </>
               )}
               <div className="flex gap-2 pt-1">
-                <button onClick={() => { setMode('view'); setActionError('') }} className="flex-1 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium border border-gray-200 rounded-xl">Cancel</button>
+                <button onClick={() => { setMode('view'); setActionError(''); setAvatarFile(null); setAvatarPreview(user.avatar_url || ''); setAvatarError('') }} className="flex-1 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium border border-gray-200 rounded-xl">Cancel</button>
                 <button
                   onClick={handleEdit}
-                  disabled={saving}
+                  disabled={saving || avatarUploading}
                   className="flex-1 flex items-center justify-center gap-2 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {saving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                  {saving ? 'Saving…' : 'Save Changes'}
+                  {avatarUploading
+                    ? <><Loader2 size={13} className="animate-spin" /> Uploading…</>
+                    : saving
+                    ? <><Loader2 size={13} className="animate-spin" /> Saving…</>
+                    : <><CheckCircle2 size={13} /> Save Changes</>
+                  }
                 </button>
               </div>
             </div>

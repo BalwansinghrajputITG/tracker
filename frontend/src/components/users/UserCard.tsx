@@ -23,8 +23,16 @@ export const UserCard: React.FC<UserCardProps> = ({ user, index, onClick, canMan
       style={{ animationDelay: `${index * 0.03}s` }}
     >
       <div className="flex items-start gap-3">
-        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${AVATAR_COLORS[role as keyof typeof AVATAR_COLORS] || AVATAR_COLORS.employee} flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm`}>
-          {user.full_name?.[0]?.toUpperCase()}
+        <div className={`w-10 h-10 rounded-xl overflow-hidden bg-gradient-to-br ${AVATAR_COLORS[role as keyof typeof AVATAR_COLORS] || AVATAR_COLORS.employee} flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm`}>
+          {user.avatar_url
+            ? <img
+                src={user.avatar_url}
+                alt={user.full_name}
+                className="w-full h-full object-cover"
+                onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+              />
+            : user.full_name?.[0]?.toUpperCase()
+          }
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">

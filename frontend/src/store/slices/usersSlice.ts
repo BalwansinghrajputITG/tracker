@@ -10,6 +10,7 @@ export interface User {
   team_ids: string[]
   last_seen: string
   phone?: string
+  avatar_url?: string
   is_active?: boolean
   created_at?: string
 }
@@ -21,6 +22,7 @@ export interface CreateUserPayload {
   department: string
   roles: string[]
   phone?: string
+  avatar_url?: string
 }
 
 interface UsersState {

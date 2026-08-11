@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     MONGODB_URL: str = ""
     MONGODB_DB_NAME: str = "enterprise_pm"
 
-    # Redis
+    # Redis — must be a full URL. Managed providers (Redis Cloud, Upstash) list the
+    # endpoint as bare "host:port"; the scheme and credentials have to be added:
+    #   redis://default:<password>@host:port      (plain)
+    #   rediss://default:<password>@host:port     (TLS)
     REDIS_URL: str = "redis://localhost:6379"
 
     # JWT
@@ -41,6 +44,11 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = "noreply@company.com"
 
+    # Cloudinary
+    CLOUDINARY_CLOUD_NAME: str = "tracking"
+    CLOUDINARY_API_KEY: str = "197499997174349"
+    CLOUDINARY_API_SECRET: str = "5L_I3PjJDP_YfZpWVUHpMKogixo"
+
     # Basecamp OAuth
     BASECAMP_REDIRECT_URI: str = "http://localhost:3000/callback"
 
@@ -55,6 +63,23 @@ class Settings(BaseSettings):
         if not self.SECRET_KEY:
             raise ValueError("SECRET_KEY must be set via environment variable")
         return self
+
+    @field_validator("REDIS_URL", mode="after")
+    @classmethod
+    def normalize_redis_url(cls, v: str) -> str:
+        """Accept a bare host:port endpoint by adding the default scheme.
+
+        redis-py rejects a scheme-less URL with a ValueError raised inside the
+        FastAPI lifespan, which kills every gunicorn worker at boot. Managed Redis
+        dashboards display the endpoint as "host:port", so that value regularly
+        lands in REDIS_URL verbatim. Normalize it instead of failing to start.
+        """
+        v = v.strip()
+        if not v:
+            raise ValueError("REDIS_URL must be set")
+        if "://" not in v:
+            return f"redis://{v}"
+        return v
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
