@@ -96,7 +96,9 @@ class Settings(BaseSettings):
         origin", which reads like a backend outage rather than a config typo.
         So each entry is normalized: whitespace trimmed, trailing slash removed
         (the Origin header never has one, making "https://app.vercel.app/" a
-        silent no-match), and blanks dropped.
+        silent no-match), and blanks dropped. Entries are also split on commas —
+        a comma cannot occur in a valid origin, so '["a.com , b.com"]' is always
+        two origins crammed into one JSON string rather than a single origin.
         """
         raw = self.ALLOWED_ORIGINS
         if isinstance(raw, str):
@@ -104,13 +106,14 @@ class Settings(BaseSettings):
             try:
                 parsed = json.loads(raw)
             except json.JSONDecodeError:
-                parsed = raw.split(",")
+                parsed = [raw]
             # A JSON scalar (e.g. '"https://a.com"' or a bare host) is still one origin.
             if not isinstance(parsed, list):
                 parsed = [parsed]
         else:
             parsed = raw
-        return [o for o in (str(x).strip().rstrip("/") for x in parsed) if o]
+        flattened = (part for x in parsed for part in str(x).split(","))
+        return [o for o in (p.strip().rstrip("/") for p in flattened) if o]
 
     class Config:
         env_file = ".env"
