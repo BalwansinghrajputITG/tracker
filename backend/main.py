@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await mongodb.connect()
     await redis_client.connect()
+    # Log the effective allow-list: a wrong value here shows up only as a 400
+    # "Disallowed CORS origin" on preflight, with nothing in the logs to explain it.
+    logger.info("CORS allowed origins: %s", settings.cors_origins)
     yield
     await mongodb.disconnect()
     await redis_client.disconnect()
@@ -35,7 +38,7 @@ app = FastAPI(
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -52,8 +52,14 @@ class Settings(BaseSettings):
     # Basecamp OAuth
     BASECAMP_REDIRECT_URI: str = "http://localhost:3000/callback"
 
-    # CORS — set via env var as JSON array: '["https://yourapp.vercel.app"]'
-    ALLOWED_ORIGINS: list = ["http://localhost:3000"]
+    # CORS — accepts a JSON array '["https://yourapp.vercel.app"]' or a plain
+    # comma-separated list. Entries must be bare origins; any trailing slash is
+    # stripped, since the browser's Origin header never carries one.
+    # Kept as a str, not a list: pydantic-settings JSON-decodes complex-typed
+    # fields inside the env source, before any validator runs, so a non-JSON
+    # value there raises SettingsError at import and the app never boots.
+    # Read the parsed value from .cors_origins.
+    ALLOWED_ORIGINS: str = "http://localhost:3000"
 
     # Rate limiting (requests allowed per second per IP)
     RATE_LIMIT_PER_SECOND: int = 500
@@ -81,15 +87,30 @@ class Settings(BaseSettings):
             return f"redis://{v}"
         return v
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")
-    @classmethod
-    def parse_allowed_origins(cls, v):
-        if isinstance(v, str):
+    @property
+    def cors_origins(self) -> list:
+        """The origin allow-list, from a JSON array or a comma-separated string.
+
+        A malformed entry is not an error anywhere at startup — it only surfaces
+        later as Starlette answering every preflight with 400 "Disallowed CORS
+        origin", which reads like a backend outage rather than a config typo.
+        So each entry is normalized: whitespace trimmed, trailing slash removed
+        (the Origin header never has one, making "https://app.vercel.app/" a
+        silent no-match), and blanks dropped.
+        """
+        raw = self.ALLOWED_ORIGINS
+        if isinstance(raw, str):
+            raw = raw.strip()
             try:
-                return json.loads(v)
+                parsed = json.loads(raw)
             except json.JSONDecodeError:
-                return [v]
-        return v
+                parsed = raw.split(",")
+            # A JSON scalar (e.g. '"https://a.com"' or a bare host) is still one origin.
+            if not isinstance(parsed, list):
+                parsed = [parsed]
+        else:
+            parsed = raw
+        return [o for o in (str(x).strip().rstrip("/") for x in parsed) if o]
 
     class Config:
         env_file = ".env"
