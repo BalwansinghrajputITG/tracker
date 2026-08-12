@@ -1,9 +1,11 @@
-import React, { lazy } from 'react'
-import { Provider, useSelector } from 'react-redux'
+import React, { lazy, useEffect } from 'react'
+import { Provider, useSelector, useDispatch } from 'react-redux'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ErrorBoundary } from 'react-error-boundary'
 import { store } from './store'
 import { RootState } from './store'
+import { permissionsRehydrated } from './store/slices/authSlice'
+import { api } from './utils/api'
 import { LoginPage } from './pages/LoginPage'
 import { AppLayout } from './pages/AppLayout'
 import { GlobalErrorFallback } from './components/common/ErrorFallback'
@@ -28,6 +30,13 @@ const SheetsPage         = lazy(() => import('./pages/SheetsPage'))
 const PersonalPage       = lazy(() => import('./pages/PersonalPage'))
 const BasecampPage       = lazy(() => import('./pages/BasecampPage').then(m => ({ default: m.BasecampPage })))
 const BasecampCallbackPage = lazy(() => import('./pages/BasecampCallbackPage').then(m => ({ default: m.BasecampCallbackPage })))
+const HrOverviewPage     = lazy(() => import('./pages/hr/HrOverviewPage').then(m => ({ default: m.HrOverviewPage })))
+const HrEmployeesPage    = lazy(() => import('./pages/hr/HrEmployeesPage').then(m => ({ default: m.HrEmployeesPage })))
+const HrTimePage         = lazy(() => import('./pages/hr/HrTimePage').then(m => ({ default: m.HrTimePage })))
+const HrRecruitmentPage  = lazy(() => import('./pages/hr/HrRecruitmentPage').then(m => ({ default: m.HrRecruitmentPage })))
+const HrPerformancePage  = lazy(() => import('./pages/hr/HrPerformancePage').then(m => ({ default: m.HrPerformancePage })))
+const HrHelpdeskPage     = lazy(() => import('./pages/hr/HrHelpdeskPage').then(m => ({ default: m.HrHelpdeskPage })))
+const HrEmployeeDetailPage = lazy(() => import('./pages/hr/HrEmployeeDetailPage').then(m => ({ default: m.HrEmployeeDetailPage })))
 
 
 function RoleDashboard() {
@@ -57,8 +66,19 @@ function UserProfileWrapper() {
 }
 
 const AppRoutes: React.FC = () => {
+  const dispatch = useDispatch()
   const { user, token } = useSelector((s: RootState) => s.auth)
   const isLoggedIn = Boolean(user && token)
+
+  // Sessions created before permissions were issued at login carry no permission
+  // set in localStorage, which would make every can() check fail silently. Fetch
+  // it once on boot for those; new logins already have it and skip this.
+  useEffect(() => {
+    if (!isLoggedIn || user?.permissions) return
+    api.get('/users/me')
+      .then(res => dispatch(permissionsRehydrated(res.data.permissions || [])))
+      .catch(() => { /* 401 is already handled by the api interceptor */ })
+  }, [isLoggedIn, user?.permissions, dispatch])
 
   if (!isLoggedIn) return <LoginPage />
 
@@ -84,6 +104,14 @@ const AppRoutes: React.FC = () => {
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="digital-marketing" element={<DigitalMarketingPage />} />
         <Route path="basecamp" element={<BasecampPage />} />
+        {/* HR Controller (docs/hr.md) */}
+        <Route path="hr" element={<HrOverviewPage />} />
+        <Route path="hr/employees" element={<HrEmployeesPage />} />
+        <Route path="hr/employees/:id" element={<HrEmployeeDetailPage />} />
+        <Route path="hr/time" element={<HrTimePage />} />
+        <Route path="hr/recruitment" element={<HrRecruitmentPage />} />
+        <Route path="hr/performance" element={<HrPerformancePage />} />
+        <Route path="hr/helpdesk" element={<HrHelpdeskPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

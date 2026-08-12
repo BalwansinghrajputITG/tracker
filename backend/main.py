@@ -7,8 +7,30 @@ from bson.errors import InvalidId
 from config import settings
 from database import mongodb, redis_client
 from routers import auth, users, teams, projects, tasks, reports, chat, notifications, chatbot, dashboard, analytics, digital_marketing, project_tools, sheets, personal, departments, basecamp
+from routers import jobs
+from routers.hr import (
+    audit as hr_audit,
+    employees as hr_employees,
+    compensation as hr_compensation,
+    organization as hr_organization,
+    documents as hr_documents,
+    attendance as hr_attendance,
+    leave as hr_leave,
+    holidays as hr_holidays,
+    recruitment as hr_recruitment,
+    interviews as hr_interviews,
+    offers as hr_offers,
+    onboarding as hr_onboarding,
+    performance as hr_performance,
+    tickets as hr_tickets,
+    dashboard as hr_dashboard,
+    analytics as hr_hranalytics,
+    reports as hr_reports,
+    integrations as hr_integrations,
+)
 from middleware.rate_limit import RateLimitMiddleware
 import logging
+import uuid
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,6 +77,48 @@ async def limit_request_body_size(request: Request, call_next):
     return await call_next(request)
 
 
+# Correlation id on every request. §29 requires a request_id on each audit row, and
+# it is what ties an audit entry to the surrounding application logs. An inbound
+# X-Request-ID is honoured so a value assigned by a proxy or the frontend survives.
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+# Invalidate the HR analytics cache after any successful HR write.
+#
+# Done here rather than with an invalidate_hr() call in each of the ~25 HR write
+# endpoints: one place cannot be forgotten, and a new endpoint added later is
+# covered automatically. The alternative — per-endpoint calls — fails silently
+# the first time someone adds a route and forgets, and a silently stale counter
+# is the hardest kind of wrong number to notice.
+#
+# It is deliberately coarse: some writes (renaming a document) move no counter.
+# Invalidation is a small SCAN+DEL and recomputation is ~250 ms, so precision
+# would cost more code than it saves work.
+@app.middleware("http")
+async def hr_cache_invalidation_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if (
+        request.method in ("POST", "PUT", "PATCH", "DELETE")
+        and f"{settings.API_PREFIX}/hr/" in request.url.path
+        and 200 <= response.status_code < 300
+        and redis_client.client is not None
+    ):
+        try:
+            from utils.cache import invalidate_hr
+            await invalidate_hr(redis_client.client)
+        except Exception as exc:
+            # Never fail a successful write because a cache sweep failed; the
+            # entry expires on its own TTL regardless.
+            logger.warning("HR cache invalidation failed: %s", exc)
+    return response
+
+
 # Security headers on every response
 @app.middleware("http")
 async def security_headers_middleware(request, call_next):
@@ -91,6 +155,27 @@ app.include_router(personal.router,         prefix=f"{prefix}/personal",        
 app.include_router(departments.router,      prefix=f"{prefix}/departments",          tags=["Departments"])
 app.include_router(basecamp.router,         prefix=f"{prefix}/basecamp",             tags=["Basecamp"])
 
+# ── HR Controller (docs/hr.md) ────────────────────────────────────────────────
+app.include_router(hr_employees.router,      prefix=f"{prefix}/hr/employees",         tags=["HR: Employees"])
+app.include_router(hr_compensation.router,   prefix=f"{prefix}/hr/compensation",      tags=["HR: Compensation"])
+app.include_router(hr_organization.router,   prefix=f"{prefix}/hr/designations",      tags=["HR: Organization"])
+app.include_router(hr_documents.router,      prefix=f"{prefix}/hr/documents",         tags=["HR: Documents"])
+app.include_router(hr_attendance.router,     prefix=f"{prefix}/hr/attendance",        tags=["HR: Attendance"])
+app.include_router(hr_leave.router,          prefix=f"{prefix}/hr/leave",             tags=["HR: Leave"])
+app.include_router(hr_holidays.router,       prefix=f"{prefix}/hr/holidays",          tags=["HR: Holidays"])
+app.include_router(hr_recruitment.router,    prefix=f"{prefix}/hr/recruitment",       tags=["HR: Recruitment"])
+app.include_router(hr_interviews.router,     prefix=f"{prefix}/hr/interviews",        tags=["HR: Interviews"])
+app.include_router(hr_offers.router,         prefix=f"{prefix}/hr/offers",            tags=["HR: Offers"])
+app.include_router(hr_onboarding.router,     prefix=f"{prefix}/hr/onboarding",        tags=["HR: Onboarding"])
+app.include_router(hr_performance.router,    prefix=f"{prefix}/hr/performance",       tags=["HR: Performance"])
+app.include_router(hr_tickets.router,        prefix=f"{prefix}/hr/tickets",           tags=["HR: Helpdesk"])
+app.include_router(hr_dashboard.router,      prefix=f"{prefix}/hr/dashboard",         tags=["HR: Dashboard"])
+app.include_router(hr_hranalytics.router,    prefix=f"{prefix}/hr/analytics",         tags=["HR: Analytics"])
+app.include_router(hr_reports.router,        prefix=f"{prefix}/hr/reports",           tags=["HR: Reports"])
+app.include_router(hr_integrations.router,   prefix=f"{prefix}/hr/integrations",      tags=["HR: Integrations"])
+app.include_router(hr_audit.router,          prefix=f"{prefix}/audit-logs",           tags=["HR: Audit"])
+app.include_router(jobs.router,              prefix=f"{prefix}/jobs",                 tags=["Jobs"])
+
 
 @app.get("/health")
 async def health_check():
@@ -118,6 +203,16 @@ async def health_check():
             checks["redis"] = f"error: {exc}"
             if overall == "ok":
                 overall = "degraded"
+
+    # Storage — optional like Redis; a misconfigured bucket should be visible
+    # here rather than discovered when someone uploads an offer letter.
+    try:
+        from services.storage import storage_health
+        checks["storage"] = await storage_health()
+        if not checks["storage"].startswith("ok") and overall == "ok":
+            overall = "degraded"
+    except Exception as exc:
+        checks["storage"] = f"error: {exc}"
 
     checks["status"] = overall
     # Only MongoDB is required to serve traffic. Returning 503 while Redis alone is

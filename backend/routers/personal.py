@@ -25,10 +25,61 @@ def _serialize(doc: dict) -> dict:
 
 # ─── Shared evaluation helper ─────────────────────────────────────────────────
 
+def _score_evaluation(
+    *, avg_hours_day: float, completion_rate: int, reports_week: int,
+    tool_counts: dict, overdue: int,
+) -> tuple[dict, int]:
+    """The weighted 0-100 evaluation score. Returns (evaluation_block, tracking_types).
+
+    Extracted so the single-user path and the batch path cannot drift: they now
+    share one scoring engine and differ only in how the inputs are fetched.
+    Changing a weight here changes both, which is the point.
+    """
+    # 25 pts — average daily hours (expected 8 h/day)
+    hours_score = min(25, round((avg_hours_day / 8.0) * 25)) if avg_hours_day else 0
+    # 25 pts — task completion rate
+    task_score = min(25, round(completion_rate * 0.25))
+    # 20 pts — report compliance this week (expected 5 reports)
+    compliance_score = min(20, round((reports_week / 5.0) * 20))
+    # 15 pts — tracking tools coverage (docs + sheets + github, 5 pts each, max 3)
+    tracking_types = sum(1 for lt in ("docs", "sheets", "github") if tool_counts.get(lt, 0) > 0)
+    tool_score = min(15, tracking_types * 5)
+    # 15 pts — reliability: starts at 15, loses 3 per overdue task
+    reliability_score = max(0, 15 - overdue * 3)
+
+    eval_score = hours_score + task_score + compliance_score + tool_score + reliability_score
+
+    if eval_score >= 80:
+        eval_label, eval_color = "Excellent", "green"
+    elif eval_score >= 60:
+        eval_label, eval_color = "On Track", "blue"
+    elif eval_score >= 40:
+        eval_label, eval_color = "Needs Attention", "amber"
+    else:
+        eval_label, eval_color = "At Risk", "red"
+
+    return {
+        "score": eval_score,
+        "label": eval_label,
+        "color": eval_color,
+        "breakdown": {
+            "hours":       hours_score,
+            "tasks":       task_score,
+            "compliance":  compliance_score,
+            "tools":       tool_score,
+            "reliability": reliability_score,
+        },
+    }, tracking_types
+
+
 async def _compute_evaluation(uid: ObjectId, db) -> dict:
     """
     Compute work-hours + tool-coverage + task + compliance signals
     and return a scored evaluation mode for the given user.
+
+    ~14 round trips for ONE user. Fine for /personal and /user-evaluation/{id};
+    for a roster use _batch_evaluations(), which does the same work for everyone
+    in 3 aggregations.
     """
     now        = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -90,29 +141,10 @@ async def _compute_evaluation(uid: ObjectId, db) -> dict:
         lt = lnk.get("link_type", "other")
         tool_counts[lt] = tool_counts.get(lt, 0) + 1
 
-    # Weighted evaluation score (0 – 100)
-    # 25 pts  — average daily hours (expected 8 h/day)
-    hours_score      = min(25, round((avg_hours_day / 8.0) * 25)) if avg_hours_day else 0
-    # 25 pts  — task completion rate
-    task_score       = min(25, round(completion_rate * 0.25))
-    # 20 pts  — report compliance this week (expected 5 reports)
-    compliance_score = min(20, round((reports_week / 5.0) * 20))
-    # 15 pts  — tracking tools coverage (docs + sheets + github, 5 pts each, max 3)
-    tracking_types   = sum(1 for lt in ("docs", "sheets", "github") if tool_counts.get(lt, 0) > 0)
-    tool_score       = min(15, tracking_types * 5)
-    # 15 pts  — reliability: starts at 15, loses 3 per overdue task
-    reliability_score = max(0, 15 - overdue * 3)
-
-    eval_score = hours_score + task_score + compliance_score + tool_score + reliability_score
-
-    if eval_score >= 80:
-        eval_label, eval_color = "Excellent",        "green"
-    elif eval_score >= 60:
-        eval_label, eval_color = "On Track",         "blue"
-    elif eval_score >= 40:
-        eval_label, eval_color = "Needs Attention",  "amber"
-    else:
-        eval_label, eval_color = "At Risk",          "red"
+    evaluation, tracking_types = _score_evaluation(
+        avg_hours_day=avg_hours_day, completion_rate=completion_rate,
+        reports_week=reports_week, tool_counts=tool_counts, overdue=overdue,
+    )
 
     return {
         "tasks": {
@@ -131,21 +163,119 @@ async def _compute_evaluation(uid: ObjectId, db) -> dict:
             "other":  tool_counts["other"],
             "total_tracking": tracking_types,   # docs + sheets + github (not other)
         },
-        "evaluation": {
-            "score": eval_score,
-            "label": eval_label,
-            "color": eval_color,
-            "breakdown": {
-                "hours":       hours_score,
-                "tasks":       task_score,
-                "compliance":  compliance_score,
-                "tools":       tool_score,
-                "reliability": reliability_score,
-            },
-        },
+        "evaluation": evaluation,
         "mood_trend":       mood_trend,
         "recent_completed": recent_tasks,
     }
+
+
+async def _batch_evaluations(uids: list, db) -> dict:
+    """Evaluation summaries for many users in THREE aggregations.
+
+    The per-user path costs ~14 round trips; looping it over a roster is what
+    made /team-evaluations take ~490 ms per member (≈4 minutes for 500 people).
+    This computes the same inputs set-wise and then runs the SAME scoring
+    function, so the numbers are identical by construction rather than by
+    a second implementation that happens to agree.
+
+    Only the fields /team-evaluations actually returns are computed — the
+    per-user path also builds mood trends and recent-task lists that the roster
+    view discards.
+    """
+    if not uids:
+        return {}
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    week_start = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    # 1 — Tasks. $unwind first so a task assigned to two people counts for both,
+    # matching count_documents({"assignee_ids": uid}) exactly.
+    task_stats: dict = {}
+    async for row in db.tasks.aggregate([
+        {"$match": {"assignee_ids": {"$in": uids}}},
+        {"$unwind": "$assignee_ids"},
+        {"$match": {"assignee_ids": {"$in": uids}}},
+        {"$group": {
+            "_id": "$assignee_ids",
+            "total": {"$sum": 1},
+            "done": {"$sum": {"$cond": [{"$eq": ["$status", "done"]}, 1, 0]}},
+            "overdue": {"$sum": {"$cond": [
+                {"$and": [
+                    {"$lt": ["$due_date", now]},
+                    {"$ne": ["$due_date", None]},
+                    {"$ne": ["$status", "done"]},
+                ]}, 1, 0]}},
+            "total_hours": {"$sum": "$logged_hours"},
+        }},
+    ]):
+        task_stats[str(row["_id"])] = row
+
+    # 2 — Reports: this week's count and this month's average hours.
+    report_stats: dict = {}
+    async for row in db.daily_reports.aggregate([
+        {"$match": {"user_id": {"$in": uids}, "report_date": {"$gte": month_start}}},
+        {"$group": {
+            "_id": "$user_id",
+            "avg_hours": {"$avg": "$structured_data.hours_worked"},
+            "this_week": {"$sum": {"$cond": [{"$gte": ["$report_date", week_start]}, 1, 0]}},
+        }},
+    ]):
+        report_stats[str(row["_id"])] = row
+
+    # 3 — Tracking tools by type.
+    tool_stats: dict = {}
+    async for row in db.personal_links.aggregate([
+        {"$match": {"user_id": {"$in": uids}}},
+        {"$group": {"_id": {"user": "$user_id", "type": "$link_type"}, "count": {"$sum": 1}}},
+    ]):
+        entry = tool_stats.setdefault(str(row["_id"]["user"]), {})
+        entry[row["_id"].get("type") or "other"] = row["count"]
+
+    out: dict = {}
+    for uid in uids:
+        key = str(uid)
+        tasks = task_stats.get(key, {})
+        reports = report_stats.get(key, {})
+        tools = tool_stats.get(key, {})
+
+        total = tasks.get("total", 0)
+        done = tasks.get("done", 0)
+        overdue = tasks.get("overdue", 0)
+        completion_rate = round(done / total * 100) if total else 0
+        # `or 0` mirrors the per-user path: $avg yields None when the field is
+        # absent on every matched document.
+        avg_hours_day = round(reports.get("avg_hours") or 0, 1)
+        reports_week = reports.get("this_week", 0)
+
+        evaluation, tracking_types = _score_evaluation(
+            avg_hours_day=avg_hours_day, completion_rate=completion_rate,
+            reports_week=reports_week, tool_counts=tools, overdue=overdue,
+        )
+
+        out[key] = {
+            "evaluation": evaluation,
+            "tracking_tools": {
+                "docs":   tools.get("docs", 0),
+                "sheets": tools.get("sheets", 0),
+                "github": tools.get("github", 0),
+                "other":  tools.get("other", 0),
+                "total_tracking": tracking_types,
+            },
+            "tasks": {
+                "done": done,
+                "overdue": overdue,
+                "completion_rate": completion_rate,
+                "total_hours": round(tasks.get("total_hours", 0) or 0, 1),
+            },
+            "reports": {
+                "this_week": reports_week,
+                "avg_hours_day": avg_hours_day,
+            },
+        }
+    return out
 
 
 # ─── Personal Links ───────────────────────────────────────────────────────────
@@ -395,26 +525,16 @@ async def get_team_evaluations(
     else:
         members = []
 
-    results = []
-    for m in members:
-        ev = await _compute_evaluation(m["_id"], db)
-        results.append({
-            "user_id":      str(m["_id"]),
-            "full_name":    m["full_name"],
-            "primary_role": m.get("primary_role", "employee"),
-            "department":   m.get("department", ""),
-            "evaluation":   ev["evaluation"],
-            "tracking_tools": ev["tracking_tools"],
-            "tasks": {
-                "done":             ev["tasks"]["done"],
-                "overdue":          ev["tasks"]["overdue"],
-                "completion_rate":  ev["tasks"]["completion_rate"],
-                "total_hours":      ev["tasks"]["total_hours"],
-            },
-            "reports": {
-                "this_week":     ev["reports"]["this_week"],
-                "avg_hours_day": ev["reports"]["avg_hours_day"],
-            },
-        })
+    # One batched computation for the whole roster, instead of ~14 queries per
+    # member. Output shape is unchanged.
+    evaluations = await _batch_evaluations([m["_id"] for m in members], db)
+
+    results = [{
+        "user_id":      str(m["_id"]),
+        "full_name":    m["full_name"],
+        "primary_role": m.get("primary_role", "employee"),
+        "department":   m.get("department", ""),
+        **evaluations[str(m["_id"])],
+    } for m in members]
 
     return {"evaluations": results}

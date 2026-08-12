@@ -18,6 +18,7 @@ TTL_PROJECTS  = 300   # 5 min
 TTL_PROJECT   = 600   # 10 min
 TTL_AI        = 900   # 15 min  (LLM calls are expensive)
 TTL_EMPLOYEES = 300   # 5 min
+TTL_HR        = 300   # 5 min  (HR dashboard + §26 analytics)
 
 
 def analytics_key(endpoint: str, user_id: str, **params) -> str:
@@ -91,4 +92,19 @@ async def invalidate_on_project_write(redis) -> None:
     """Invalidate analytics caches affected by project create/update/delete."""
     for pattern in ("analytics:company:*", "analytics:projects:*",
                     "analytics:project:*"):
+        await delete_pattern(redis, pattern)
+
+
+async def invalidate_hr(redis) -> None:
+    """Invalidate the HR dashboard and §26 analytics caches.
+
+    One coarse sweep rather than per-metric invalidation: the dashboard reads
+    across eight collections, so working out which counters a given write moved
+    would be more code than recomputing them, and getting it wrong shows up as a
+    number that is quietly stale. Recomputing costs ~250 ms.
+
+    Keys are per-user (scoping differs by role), so the glob covers every
+    caller's copy.
+    """
+    for pattern in ("analytics:hr_*", "analytics:hr:*"):
         await delete_pattern(redis, pattern)

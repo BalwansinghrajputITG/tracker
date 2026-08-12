@@ -12,6 +12,14 @@ import usersReducer from './slices/usersSlice'
 import digitalMarketingReducer from './slices/digitalMarketingSlice'
 import sheetsReducer from './slices/sheetsSlice'
 import themeReducer from './slices/themeSlice'
+import hrEmployeesReducer from './slices/hrEmployeesSlice'
+import hrOrgReducer from './slices/hrOrgSlice'
+import hrDocumentsReducer from './slices/hrDocumentsSlice'
+import hrTimeReducer from './slices/hrTimeSlice'
+import hrRecruitmentReducer from './slices/hrRecruitmentSlice'
+import hrPerformanceReducer from './slices/hrPerformanceSlice'
+import hrTicketsReducer from './slices/hrTicketsSlice'
+import hrDashboardReducer from './slices/hrDashboardSlice'
 
 const combinedReducer = combineReducers({
   auth: authReducer,
@@ -27,6 +35,14 @@ const combinedReducer = combineReducers({
   digitalMarketing: digitalMarketingReducer,
   sheets: sheetsReducer,
   theme: themeReducer,
+  hrEmployees: hrEmployeesReducer,
+  hrOrg: hrOrgReducer,
+  hrDocuments: hrDocumentsReducer,
+  hrTime: hrTimeReducer,
+  hrRecruitment: hrRecruitmentReducer,
+  hrPerformance: hrPerformanceReducer,
+  hrTickets: hrTicketsReducer,
+  hrDashboard: hrDashboardReducer,
 })
 
 /**

@@ -3,7 +3,7 @@ import { useSelector, useDispatch } from 'react-redux'
 import {
   LayoutDashboard, FolderKanban, ListChecks, FileText,
   Users, UserPlus, MessageSquare, BarChart3, Settings, LogOut,
-  Zap, ChevronRight, BookOpen, Link2,
+  Zap, ChevronRight, BookOpen, Link2, Gauge, Contact, CalendarClock, UserSearch, Target, LifeBuoy,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { RootState } from '../../store'
@@ -11,12 +11,18 @@ import { logout } from '../../store/slices/authSlice'
 import {
   ROLE_LABELS, ROLE_AVATAR_GRADIENT, ROLE_BADGE_SIMPLE, NAV_ROLES,
 } from '../../constants/roles'
+import { NAV_PERMISSIONS, Permission } from '../../constants/permissions'
+import { hasPermission } from '../../hooks/usePermissions'
 
 interface NavItem {
   label: string
   icon: React.ReactNode
   href: string
   roles?: string[]
+  /** Permission-gated entries (HR). Any one of these grants visibility. */
+  perms?: Permission[]
+  /** Match the path exactly. Needed for parents of nested routes like /hr. */
+  exact?: boolean
 }
 
 const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
@@ -44,6 +50,17 @@ const NAV_GROUPS: Array<{ title: string; items: NavItem[] }> = [
     ],
   },
   {
+    title: 'People Ops',
+    items: [
+      { label: 'HR Overview', icon: <Gauge size={16} />,   href: '/hr',           exact: true, perms: NAV_PERMISSIONS['/hr'] },
+      { label: 'Employees',   icon: <Contact size={16} />, href: '/hr/employees', perms: NAV_PERMISSIONS['/hr/employees'] },
+      { label: 'Recruitment', icon: <UserSearch size={16} />, href: '/hr/recruitment', perms: NAV_PERMISSIONS['/hr/recruitment'] },
+      { label: 'Time & Leave', icon: <CalendarClock size={16} />, href: '/hr/time', perms: NAV_PERMISSIONS['/hr/time'] },
+      { label: 'Performance', icon: <Target size={16} />, href: '/hr/performance', perms: NAV_PERMISSIONS['/hr/performance'] },
+      { label: 'HR Helpdesk', icon: <LifeBuoy size={16} />, href: '/hr/helpdesk', perms: NAV_PERMISSIONS['/hr/helpdesk'] },
+    ],
+  },
+  {
     title: 'Personal',
     items: [
       { label: 'My Workspace', icon: <BookOpen size={16} />, href: '/personal' },
@@ -65,7 +82,13 @@ export const Sidebar: React.FC<{ currentPath: string }> = ({ currentPath }) => {
   const userRoles = new Set(user?.roles || [])
   const role = user?.primary_role || 'employee'
 
-  const isVisible = (item: NavItem) => !item.roles || item.roles.some(r => userRoles.has(r))
+  // Permission gate takes precedence over the older role gate: HR visibility is
+  // expressed as permissions, and an hr_manager holds no legacy nav role.
+  const isVisible = (item: NavItem) => {
+    if (item.perms?.length) return item.perms.some(p => hasPermission(user?.permissions, p))
+    if (item.roles?.length) return item.roles.some(r => userRoles.has(r))
+    return true
+  }
 
   return (
     <div className="w-60 bg-white border-r border-slate-100 h-screen flex flex-col shadow-sm animate-slide-in-left">
@@ -116,8 +139,12 @@ export const Sidebar: React.FC<{ currentPath: string }> = ({ currentPath }) => {
               </p>
               <div className="space-y-0.5">
                 {visible.map(item => {
-                  const isActive = currentPath === item.href ||
-                    (item.href !== '/' && currentPath.startsWith(item.href))
+                  // `exact` keeps /hr from lighting up while on /hr/employees,
+                  // and the trailing slash stops /hr matching a sibling /hrx.
+                  const isActive = item.exact
+                    ? currentPath === item.href
+                    : currentPath === item.href ||
+                      (item.href !== '/' && currentPath.startsWith(item.href + '/'))
                   const notifBadge = item.href === '/chat' ? unreadCount : 0
 
                   return (

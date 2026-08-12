@@ -11,6 +11,13 @@ import { notificationsSaga } from './notificationsSaga'
 import { dashboardSaga } from './dashboardSaga'
 import { digitalMarketingSaga } from './digitalMarketingSaga'
 import { sheetsSaga } from './sheetsSaga'
+import { hrEmployeesSaga } from './hrEmployeesSaga'
+import { hrOrgSaga } from './hrOrgSaga'
+import { hrDocumentsSaga } from './hrDocumentsSaga'
+import { hrTimeSaga } from './hrTimeSaga'
+import { hrRecruitmentSaga } from './hrRecruitmentSaga'
+import { hrPerformanceSaga } from './hrPerformanceSaga'
+import { hrDashboardSaga } from './hrDashboardSaga'
 
 export function* rootSaga() {
   yield all([
@@ -26,5 +33,12 @@ export function* rootSaga() {
     fork(dashboardSaga),
     fork(digitalMarketingSaga),
     fork(sheetsSaga),
+    fork(hrEmployeesSaga),
+    fork(hrOrgSaga),
+    fork(hrDocumentsSaga),
+    fork(hrTimeSaga),
+    fork(hrRecruitmentSaga),
+    fork(hrPerformanceSaga),
+    fork(hrDashboardSaga),
   ])
 }

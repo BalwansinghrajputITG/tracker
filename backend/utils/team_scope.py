@@ -169,6 +169,44 @@ async def get_pm_member_ids(db, user: dict) -> list:
     return list(member_ids)
 
 
+# ─── Shared row scoping ──────────────────────────────────────────────────────
+
+async def scoped_user_ids(db, user: dict) -> list | None:
+    """The user_ids this caller may see per-person records for.
+
+    Returns None for "no restriction" (exec sees everything).
+
+    Extracted from routers/reports.py:126-155, which had this ladder inline;
+    attendance and leave need exactly the same rule, and a third copy is how the
+    three drift apart. Callers layer their own filters on top and MUST re-check
+    an explicit user_id filter against the returned set rather than replacing it.
+    """
+    if is_exec(user):
+        return None
+    if is_pm(user):
+        return list({*await get_pm_member_ids(db, user), user["_id"]})
+    if is_team_lead(user):
+        return list({*await get_team_member_ids(db, user), user["_id"]})
+    return [user["_id"]]
+
+
+async def scoped_user_filter(db, user: dict, requested_user_id=None) -> dict | None:
+    """Build the {"user_id": ...} clause for a scoped list query.
+
+    Returns None when the caller asked for someone outside their scope — the
+    caller should then return an empty page rather than widening the query.
+    """
+    allowed = await scoped_user_ids(db, user)
+
+    if requested_user_id is not None:
+        requested = ObjectId(requested_user_id) if isinstance(requested_user_id, str) else requested_user_id
+        if allowed is not None and requested not in allowed:
+            return None
+        return {"user_id": requested}
+
+    return {} if allowed is None else {"user_id": {"$in": allowed}}
+
+
 # ─── Access guards (raise 403 on failure) ────────────────────────────────────
 
 async def assert_project_access(db, project: dict, user: dict):

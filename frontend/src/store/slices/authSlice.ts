@@ -9,6 +9,8 @@ interface User {
   department?: string
   team_ids?: string[]
   id?: string   // alias used in some legacy components
+  /** Effective permission set from the backend. Presentational only — see usePermissions. */
+  permissions?: string[]
 }
 
 interface AuthState {
@@ -41,6 +43,16 @@ const authSlice = createSlice({
       state.isLoading = false
       state.error = action.payload
     },
+    /**
+     * Backfill the permission set for a session that predates permissions being
+     * issued at login. Without this, an already-logged-in user would silently
+     * fail every can() check until they logged out and back in.
+     */
+    permissionsRehydrated(state, action: PayloadAction<string[]>) {
+      if (!state.user) return
+      state.user.permissions = action.payload
+      localStorage.setItem('auth', JSON.stringify({ user: state.user, token: state.token }))
+    },
     logout(state) {
       state.user = null
       state.token = null
@@ -49,5 +61,7 @@ const authSlice = createSlice({
   },
 })
 
-export const { loginRequest, loginSuccess, loginFailure, logout } = authSlice.actions
+export const {
+  loginRequest, loginSuccess, loginFailure, permissionsRehydrated, logout,
+} = authSlice.actions
 export default authSlice.reducer

@@ -31,22 +31,13 @@ ACTION_PERMISSIONS = {
     "delete_user":        {"ceo", "coo", "admin", "pm", "team_lead"},
 }
 
-# Which roles a caller can deactivate
-DELETABLE_ROLES: dict[str, set] = {
-    "ceo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "coo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "admin":     {"pm", "team_lead", "employee"},
-    "pm":        {"team_lead", "employee"},
-    "team_lead": {"employee"},
-}
-
-CREATABLE_ROLES = {
-    "ceo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "coo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "admin":     {"pm", "team_lead", "employee"},
-    "pm":        {"team_lead", "employee"},
-    "team_lead": {"employee"},
-}
+# Which roles a caller can deactivate / create via the chatbot.
+# Canonical tables live in middleware/permissions.py. The chatbot path is
+# deliberately stricter than the REST API for `admin` — see the note there.
+from middleware.permissions import (
+    CHATBOT_CREATABLE_ROLES as CREATABLE_ROLES,
+    CHATBOT_DELETABLE_ROLES as DELETABLE_ROLES,
+)
 
 VALID_STATUSES = {"todo", "in_progress", "review", "done", "blocked"}
 

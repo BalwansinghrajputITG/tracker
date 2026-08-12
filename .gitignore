@@ -9,3 +9,6 @@ build/
 backend/__pycache__/
 backend/migrations/
 nul
+# Local HR document storage (docs/hr.md §38)
+backend/_storage/
+_storage/

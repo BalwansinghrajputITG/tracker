@@ -44,10 +44,47 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = "noreply@company.com"
 
-    # Cloudinary
-    CLOUDINARY_CLOUD_NAME: str = "tracking"
-    CLOUDINARY_API_KEY: str = "197499997174349"
-    CLOUDINARY_API_SECRET: str = "5L_I3PjJDP_YfZpWVUHpMKogixo"
+    # Cloudinary (avatars only — HR documents use services/storage.py).
+    # Defaults are intentionally EMPTY: live credentials used to sit here and
+    # were committed to git. Set these via the environment and rotate the old
+    # key, which must be treated as compromised.
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
+
+    # Object storage for HR documents (hr.md §38)
+    STORAGE_BACKEND: str = "local"          # "local" | "s3"
+    STORAGE_LOCAL_DIR: str = "./_storage"
+    S3_ENDPOINT_URL: str = ""               # e.g. https://<account>.r2.cloudflarestorage.com
+    S3_BUCKET: str = ""
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_REGION: str = "auto"
+    # How long a document download link stays valid. Short by design: the link
+    # carries no identity, so its lifetime IS its access control.
+    DOCUMENT_URL_TTL_SECONDS: int = 120
+    MAX_DOCUMENT_SIZE_MB: int = 8           # below main.py's 10 MB body cap
+    # Absolute base for locally-signed download URLs.
+    PUBLIC_BASE_URL: str = "http://localhost:8001"
+
+    # Background jobs (hr.md §34). Cron calls the runner endpoint with this
+    # token; unset means the endpoint is disabled rather than open.
+    JOB_RUNNER_TOKEN: str = ""
+    # Runs the scheduler in-process. Single-worker development only — the
+    # Dockerfile runs gunicorn with 4 workers, where this would fire 4x.
+    JOB_RUNNER_IN_PROCESS: bool = False
+
+    # Keka HRIS integration (docs/hr.md §16, §36).
+    # Credentials may come from here or from the encrypted vault
+    # (hr_integration_credentials); the vault wins when both are present.
+    KEKA_BASE_URL: str = ""          # https://yourcompany.keka.com
+    KEKA_CLIENT_ID: str = ""
+    KEKA_CLIENT_SECRET: str = ""
+    KEKA_API_KEY: str = ""
+    # Fails closed: with this false no live provider is constructed, so no
+    # outbound request to Keka is possible regardless of what is configured.
+    # Turn it on only after a dry run against real credentials looks right.
+    KEKA_SYNC_ENABLED: bool = False
 
     # Basecamp OAuth
     BASECAMP_REDIRECT_URI: str = "http://localhost:3000/callback"

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 from datetime import datetime, timezone
@@ -13,6 +13,8 @@ from config import settings
 from database import get_db
 from middleware.auth import get_current_user
 from middleware.rbac import require_ceo_coo, require_manager, require_user_manager
+from middleware.permissions import ASSIGNABLE_ROLES, DELETABLE_ROLES, get_user_permissions
+from services.audit_service import audit
 from utils.team_scope import (
     is_exec, is_pm, is_admin, is_team_lead,
     get_team_member_ids,
@@ -32,13 +34,11 @@ router = APIRouter()
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Roles each creator level is allowed to assign.
+# Canonical table lives in middleware/permissions.py — imported rather than copied
+# so this and the chatbot can no longer drift apart.
 # MUST stay in sync with frontend/src/constants/roles.ts → ASSIGNABLE_ROLES
 _ALLOWED_ROLES: dict[str, list[str]] = {
-    "ceo":       ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
-    "coo":       ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
-    "admin":     ["ceo", "coo", "admin", "pm", "team_lead", "employee"],
-    "pm":        ["team_lead", "employee"],
-    "team_lead": ["employee"],
+    role: sorted(allowed) for role, allowed in ASSIGNABLE_ROLES.items()
 }
 
 
@@ -84,7 +84,11 @@ class UserUpdate(BaseModel):
 
 @router.get("/me")
 async def get_me(current_user=Depends(get_current_user)):
-    return serialize(dict(current_user))
+    me = serialize(dict(current_user))
+    # Effective permissions travel with the profile so a page refresh does not
+    # have to re-login to learn what the UI may show.
+    me["permissions"] = sorted(get_user_permissions(current_user))
+    return me
 
 
 @router.post("/upload-avatar")
@@ -94,6 +98,14 @@ async def upload_avatar(
 ):
     """Upload a profile image to Cloudinary and return the secure URL."""
     import asyncio
+
+    # Credentials are empty by default (they were previously hardcoded and
+    # leaked). Say so plainly instead of letting the SDK fail as an opaque 500.
+    if not settings.CLOUDINARY_CLOUD_NAME or not settings.CLOUDINARY_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Avatar uploads are unavailable: Cloudinary is not configured.",
+        )
 
     if file.content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
         raise HTTPException(status_code=400, detail="Only JPEG, PNG, WebP, or GIF images are allowed.")
@@ -570,6 +582,7 @@ async def get_user_profile(
 async def update_user(
     user_id: str,
     body: UserUpdate,
+    request: Request,
     current_user=Depends(get_current_user),
     db=Depends(get_db),
 ):
@@ -611,20 +624,35 @@ async def update_user(
 
     updates["updated_at"] = datetime.now(timezone.utc)
 
+    # Snapshot only the fields being written — the audit diff needs the prior values
+    # and re-reading the whole document would log noise on every unrelated field.
+    before = await db.users.find_one(
+        {"_id": ObjectId(user_id)}, {k: 1 for k in updates},
+    )
+
     result = await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Role and account-status changes are privilege changes — always audited.
+    if {"roles", "primary_role", "is_active", "email"} & set(updates):
+        await audit(
+            db,
+            action="user.updated",
+            actor=current_user,
+            entity_type="user",
+            entity_id=user_id,
+            before=before,
+            after=updates,
+            request=request,
+            subject_user_id=user_id,
+        )
+
     return {"message": "User updated"}
 
 
-# MUST stay in sync with frontend/src/constants/roles.ts → ASSIGNABLE_ROLES
-_DELETABLE_ROLES: dict[str, set] = {
-    "ceo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "coo":       {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "admin":     {"ceo", "coo", "admin", "pm", "team_lead", "employee"},
-    "pm":        {"team_lead", "employee"},
-    "team_lead": {"employee"},
-}
+# Canonical table lives in middleware/permissions.py.
+_DELETABLE_ROLES: dict[str, set] = DELETABLE_ROLES
 
 
 @router.delete("/{user_id}")

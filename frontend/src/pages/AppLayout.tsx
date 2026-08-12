@@ -48,11 +48,20 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
   '/analytics':          { title: 'Analytics',          sub: 'Company-wide performance data'                     },
   '/digital-marketing':  { title: 'Digital Marketing',  sub: 'Marketing performance & campaign insights'         },
   '/basecamp':  { title: 'Basecamp',    sub: 'Projects, todos, messages & more' },
+  '/hr':           { title: 'HR Overview', sub: 'Workforce, structure & reporting lines' },
+  '/hr/employees': { title: 'Employees',   sub: 'Directory & employment records'         },
+  '/hr/time':      { title: 'Time & Leave', sub: 'Attendance, leave & holidays'          },
+  '/hr/recruitment': { title: 'Recruitment', sub: 'Openings, pipeline, interviews & offers' },
+  '/hr/performance': { title: 'Performance', sub: 'Goals & review cycles'                    },
+  '/hr/helpdesk':    { title: 'HR Helpdesk', sub: 'Tickets & employee requests'              },
   '/settings':  { title: 'Settings',   sub: 'Account & preferences'            },
 }
 
 function resolvePageMeta(pathname: string) {
   if (PAGE_META[pathname]) return PAGE_META[pathname]
+  // Order matters: /hr/employees/ must be tested before the /users/ prefix and
+  // before any bare /hr fallback, or a profile page renders as the directory.
+  if (pathname.startsWith('/hr/employees/')) return { title: 'Employee Profile', sub: 'Full employment record' }
   if (pathname.startsWith('/projects/')) return { title: 'Project Detail', sub: 'Full project overview & analytics' }
   if (pathname.startsWith('/users/'))    return { title: 'User Profile', sub: 'Full user overview' }
   return { title: 'Dashboard', sub: '' }

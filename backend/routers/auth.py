@@ -9,6 +9,7 @@ import hashlib
 
 from config import settings
 from database import get_db
+from middleware.permissions import get_user_permissions
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -46,6 +47,9 @@ class TokenResponse(BaseModel):
     roles: list[str]
     primary_role: str
     full_name: str
+    # Effective permission set, so the UI can hide what the caller cannot do.
+    # Presentational only — every endpoint re-checks server-side.
+    permissions: list[str] = []
 
 
 def create_token(subject: str, expires_delta: timedelta) -> str:
@@ -83,6 +87,7 @@ async def login(body: LoginRequest, response: Response, db=Depends(get_db)):
         roles=user.get("roles", []),
         primary_role=user.get("primary_role", user.get("roles", ["employee"])[0]),
         full_name=user["full_name"],
+        permissions=sorted(get_user_permissions(user)),
     )
 
 

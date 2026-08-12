@@ -15,6 +15,7 @@ function* handleLogin(action: ReturnType<typeof loginRequest>) {
         full_name: response.data.full_name,
         roles: response.data.roles,
         primary_role: response.data.primary_role || response.data.roles?.[0] || 'employee',
+        permissions: response.data.permissions || [],
       },
       token: response.data.access_token,
     }))
